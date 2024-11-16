@@ -50,6 +50,17 @@ function broadcastUpdate(update) {
   });
 }
 
+// Test route to check database connection
+app.get('/db-test', (req, res) => {
+  db.query('SELECT 1 + 1 AS result', (err, results) => {
+    if (err) {
+      console.error('Database connection error:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+    res.send({ success: true, message: 'Database connected', results });
+  });
+});
+
 app.get('/', (req, res) => {
   res.send('API is running!');
 });
