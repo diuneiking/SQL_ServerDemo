@@ -53,13 +53,12 @@ function broadcastUpdate(update) {
   });
 }
 
-app.get('/db-test', (req, res) => {
-    db.query('SELECT 1 + 1 AS solution', (error, results) => {
-        if (error) {
-            return res.status(500).json({ error: error.message });
-        }
-        res.json({ message: 'DB connection successful', solution: results[0].solution });
-    });
+app.get('/', (req, res) => {
+  res.send('API is running!');
+});
+
+app.get('/test', (req, res) => {
+  res.json({ message: 'API test endpoint working!' });
 });
 
 app.post('/login', (req, res) => {
