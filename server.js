@@ -10,7 +10,11 @@ const port = 3000;
 
 // Middleware
 app.use(bodyParser.json());
-app.use(cors());
+app.use(cors({
+    origin: '*', // Use '*' for testing; restrict to specific domains in production
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // // Database connection
 const db = mysql.createPool({
