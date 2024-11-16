@@ -11,7 +11,7 @@ const port = 3000;
 // Middleware
 app.use(bodyParser.json());
 app.use(cors());
-
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
 const db = mysql.createPool({
