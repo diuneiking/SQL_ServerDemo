@@ -49,6 +49,14 @@ function broadcastUpdate(update) {
   });
 }
 
+app.get('/db-test', (req, res) => {
+    db.query('SELECT 1 + 1 AS solution', (error, results) => {
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+        res.json({ message: 'DB connection successful', solution: results[0].solution });
+    });
+});
 
 app.post('/login', (req, res) => {
   const { staffCode, password } = req.body;
