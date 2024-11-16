@@ -1614,34 +1614,39 @@ app.put('/shifts-payouts/update', (req, res) => {
   });
 });
 
-// Login route using connection pool
 app.post('/1login', (req, res) => {
-  const { staffCode, password } = req.body;  // Extract staffCode and password from request body
-
-  // Ensure staffCode and password are provided
-  if (!staffCode || !password) {
-    return res.status(400).send({ success: false, message: 'StaffCode and Password are required' });
-  }
-
-  const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
-
-  // Use pool.query for executing the SQL query
-  db.query(query, [staffCode, password], (err, results) => {
-    if (err) {
-      console.error('Error executing query:', err); // Log the error for debugging
-      return res.status(500).send({ success: false, message: 'Internal server error' });
-    }
-
-    // Check if any results are returned
-    if (results.length > 0) {
-      // Return the first matching user
-      return res.status(200).send({ success: true, user: results[0] });
-    } else {
-      // Return error response if no user is found
-      return res.status(401).send({ success: false, message: 'Invalid credentials' });
-    }
-  });
+  console.log('Request received at /1login:', req.body);
+  res.send({ success: true, message: 'Login endpoint is active', body: req.body });
 });
+
+// Login route using connection pool
+// app.post('/1login', (req, res) => {
+//   const { staffCode, password } = req.body;  // Extract staffCode and password from request body
+
+//   // Ensure staffCode and password are provided
+//   if (!staffCode || !password) {
+//     return res.status(400).send({ success: false, message: 'StaffCode and Password are required' });
+//   }
+
+//   const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
+
+//   // Use pool.query for executing the SQL query
+//   db.query(query, [staffCode, password], (err, results) => {
+//     if (err) {
+//       console.error('Error executing query:', err); // Log the error for debugging
+//       return res.status(500).send({ success: false, message: 'Internal server error' });
+//     }
+
+//     // Check if any results are returned
+//     if (results.length > 0) {
+//       // Return the first matching user
+//       return res.status(200).send({ success: true, user: results[0] });
+//     } else {
+//       // Return error response if no user is found
+//       return res.status(401).send({ success: false, message: 'Invalid credentials' });
+//     }
+//   });
+// });
 
 
 // Fetch items grouped by category with DepartmentID
