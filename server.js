@@ -1644,13 +1644,6 @@ app.post('/1login', (req, res) => {
   });
 });
 
-// Handle undefined routes
-app.use((req, res) => {
-  console.warn(`Undefined route accessed: ${req.method} ${req.url}`);
-  res.status(404).send({ success: false, message: 'Endpoint not found' });
-});
-
-
 // Fetch items grouped by category with DepartmentID
 app.get('/1items', (req, res) => {
   const query = `
@@ -2139,6 +2132,14 @@ wss.on('connection', (ws) => {
     console.log('WebSocket client disconnected');
   });
 });
+
+// Handle undefined routes
+app.use((req, res) => {
+  console.warn(`Undefined route accessed: ${req.method} ${req.url}`);
+  res.status(404).send({ success: false, message: 'Endpoint not found' });
+});
+
+
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
