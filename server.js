@@ -1618,7 +1618,6 @@ app.post('/1login', (req, res) => {
   }
 
   const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
-  console.log('Executing query:', query, [staffCode, password]);
 
   // Use pool.query for executing the SQL query
   db.query(query, [staffCode, password], (err, results) => {
@@ -1630,8 +1629,6 @@ app.post('/1login', (req, res) => {
         error: err.message, // Include the error message in response for debugging
       });
     }
-
-    console.log('Query results:', results);
 
     // Check if any results are returned
     if (results.length > 0) {
