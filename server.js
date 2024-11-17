@@ -24,16 +24,12 @@ const db = mysql.createPool({
   queueLimit: 0
 });
 
-// Database connection
-// const db = mysql.createPool({
-//   host: 'localhost',
-//   user: 'root',
-//   password: '8811967z',
-//   database: 'gnik',
-//   waitForConnections: true,
-//   connectionLimit: 10,
-//   queueLimit: 0
-// });
+// Logging middleware for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Request Body:', req.body);
+  next();
+});
 
 // Create an HTTP server
 const server = http.createServer(app);
@@ -49,25 +45,6 @@ function broadcastUpdate(update) {
     }
   });
 }
-
-// Test route to check database connection
-app.get('/db-test', (req, res) => {
-  db.query('SELECT 1 + 1 AS result', (err, results) => {
-    if (err) {
-      console.error('Database connection error:', err);
-      return res.status(500).send({ success: false, message: 'Database error' });
-    }
-    res.send({ success: true, message: 'Database connected', results });
-  });
-});
-
-app.get('/', (req, res) => {
-  res.send('API is running!');
-});
-
-app.get('/test', (req, res) => {
-  res.json({ message: 'API test endpoint working!' });
-});
 
 app.post('/login', (req, res) => {
   const { staffCode, password } = req.body;
@@ -1627,34 +1604,45 @@ app.put('/shifts-payouts/update', (req, res) => {
 
 // Login route using connection pool
 app.post('/1login', (req, res) => {
-  const { staffCode, password } = req.body;  // Extract staffCode and password from request body
+  const { staffCode, password } = req.body; // Extract staffCode and password from request body
 
   // Ensure staffCode and password are provided
   if (!staffCode || !password) {
+    console.warn('Validation failed: Missing staffCode or password');
     return res.status(400).send({ success: false, message: 'StaffCode and Password are required' });
   }
 
   const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
   console.log('Executing query:', query, [staffCode, password]);
-  
+
   // Use pool.query for executing the SQL query
   db.query(query, [staffCode, password], (err, results) => {
     if (err) {
-      console.error('Error executing query:', err); // Log the error for debugging
-      return res.status(500).send({ success: false, message: 'Internal server error' });
+      console.error('Database query error:', err.message); // Log the detailed error for debugging
+      return res.status(500).send({ 
+        success: false, 
+        message: 'Internal server error',
+        error: err.message, // Include the error message in response for debugging
+      });
     }
 
     console.log('Query results:', results);
-    
+
     // Check if any results are returned
     if (results.length > 0) {
-      // Return the first matching user
+      console.log('Login successful for staffCode:', staffCode);
       return res.status(200).send({ success: true, user: results[0] });
     } else {
-      // Return error response if no user is found
+      console.warn('Invalid credentials for staffCode:', staffCode);
       return res.status(401).send({ success: false, message: 'Invalid credentials' });
     }
   });
+});
+
+// Handle undefined routes
+app.use((req, res) => {
+  console.warn(`Undefined route accessed: ${req.method} ${req.url}`);
+  res.status(404).send({ success: false, message: 'Endpoint not found' });
 });
 
 
