@@ -46,6 +46,11 @@ function broadcastUpdate(update) {
   });
 }
 
+app.get('/', (req, res) => {
+  res.send({ message: 'Server is running' });
+});
+
+
 app.post('/login', (req, res) => {
   const { staffCode, password } = req.body;
 
