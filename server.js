@@ -111,6 +111,45 @@ app.post('/admin_login', (req, res) => {
   });
 });
 
+// Fetch categories for Heehee branch
+app.get('/heehee_categories', (req, res) => {
+  const query = `
+    SELECT DISTINCT items.Category
+    FROM items
+    WHERE items.Branch = 'Heehee' AND items.IsInactive = 0
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching Heehee categories:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results.map(result => result.Category)); // Send only category names
+    }
+  });
+});
+
+// Fetch items by category and Branch = Heehee
+app.get('/heehee_items/:category', (req, res) => {
+  const category = req.params.category;
+  const query = `
+    SELECT items.*, department.DepartmentName
+    FROM items
+    LEFT JOIN department ON items.DepartmentID = department.DepartmentID
+    WHERE items.Branch = 'Heehee' AND items.Category = ? AND items.IsInactive = 0
+  `;
+
+  db.query(query, [category], (err, results) => {
+    if (err) {
+      console.error('Error fetching Heehee items:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
 // Fetch categories
 app.get('/categories', (req, res) => {
   const query = 'SELECT * FROM categories WHERE IsInactive = 0';
