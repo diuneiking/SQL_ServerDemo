@@ -1,3 +1,4 @@
+
 const express = require('express');
 const mysql = require('mysql2');
 const bodyParser = require('body-parser');
@@ -23,6 +24,18 @@ const db = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0
 });
+
+// // Database connection
+// const db = mysql.createPool({
+//   host: 'srv1627.hstgr.io',
+//   user: 'u461355420_hidden',
+//   password: 'Hidden@2024',
+//   database: 'u461355420_hl',
+//   waitForConnections: true,
+//   connectionLimit: 10,
+//   queueLimit: 0
+// });
+
 
 // Logging middleware for debugging
 app.use((req, res, next) => {
@@ -470,7 +483,6 @@ app.get('/payment_methods', (req, res) => {
   });
 });
 
-// Insert into sales table
 app.post('/insert_sales_data', (req, res) => {
   const {
     orderId,
@@ -483,11 +495,11 @@ app.post('/insert_sales_data', (req, res) => {
     completedBy: userName,
     tableName,
     isTakeAway,
-    discountCode,   // New field
-    discountName,   // New field
-    discountType,   // New field
-    tenderedCash,   // Tendered cash from client
-    changes         // Changes from client (renamed from Change)
+    discountCode,
+    discountName,
+    discountType,
+    tenderedCash,
+    changes
   } = req.body;
 
   if (!userName) {
@@ -495,109 +507,402 @@ app.post('/insert_sales_data', (req, res) => {
     return res.status(400).send('CompletedBy field is required');
   }
 
-  const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge; // Only apply service charge if not take away
+  if (!orderItems || orderItems.length === 0) {
+    console.error('Order items are empty');
+    return res.status(400).send('Order items cannot be empty');
+  }
+
+  const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
+  console.log('Received Order Items:', orderItems);
 
   const insertSalesQuery = `
-    INSERT INTO sales (OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, discountName, discountType, TenderedCash, Changes) 
+    INSERT INTO sales (
+      OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
+      ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
+      discountName, discountType, TenderedCash, Changes
+    ) 
     VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
-  // Calculate total price as the sum of all order item prices
   const totalItemPrice = orderItems.reduce((sum, item) => sum + item.Price * item.Quantity, 0);
-
-  // Final price after applying discount, service charge, and rounding
   const finalPrice = totalItemPrice - discount + calculatedServiceCharge + rounding;
 
-  db.query(insertSalesQuery, [
-    orderId,
-    totalItemPrice,
-    finalPrice,
-    JSON.stringify(paymentDetails),
-    discount,
-    calculatedServiceCharge,
-    rounding,
-    userName,
-    tableName,
-    isTakeAway ? 1 : 0,
-    discountCode,
-    discountName,
-    discountType,
-    tenderedCash,   // Add tenderedCash to the query
-    changes         // Add changes to the query
-  ], (err, result) => {
+  db.getConnection((err, connection) => {
     if (err) {
-      console.error('Failed to insert into sales:', err);
-      return res.status(500).send('Failed to insert sales data');
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
     }
 
-    const salesId = result.insertId;
-
-    // Insert into sales_items table
-    const insertSalesItemsQuery = `
-      INSERT INTO sales_items (SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    let itemsProcessed = 0;
-    for (let item of orderItems) {
-      if (!item.ItemCode || !item.ItemName || item.Quantity == null || item.Price == null) {
-        console.error('Missing mandatory data in item:', item);
-        return res.status(400).send('Invalid data in order items');
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
       }
 
-      const addOnsJson = JSON.stringify(item.SelectedAddOns || []);
+      connection.query(insertSalesQuery, [
+        orderId,
+        totalItemPrice,
+        finalPrice,
+        JSON.stringify(paymentDetails),
+        discount,
+        calculatedServiceCharge,
+        rounding,
+        userName,
+        tableName,
+        isTakeAway ? 1 : 0,
+        discountCode,
+        discountName,
+        discountType,
+        tenderedCash,
+        changes
+      ], (err, result) => {
+        if (err) {
+          console.error('Failed to insert into sales:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to insert sales data');
+          });
+        }
 
-      db.query(insertSalesItemsQuery, 
-        [salesId, item.ItemCode, item.ItemName, item.Quantity, item.Price, orderId, item.Remark || '', item.ModifierCode || '', addOnsJson, isTakeAway ? 1 : 0], 
-        (err, result) => {
-          if (err) {
-            console.error('Failed to insert into sales_items:', err);
-            return res.status(500).send('Failed to insert sales items');
-          }
+        const salesId = result.insertId;
 
-          itemsProcessed++;
-          if (itemsProcessed === orderItems.length) {
+        const insertSalesItemsPromises = orderItems.map((item) => {
+          const insertSalesItemsQuery = `
+            INSERT INTO sales_items (
+              SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          return new Promise((resolve, reject) => {
+            connection.query(insertSalesItemsQuery, [
+              salesId,
+              item.ItemCode,
+              item.ItemName,
+              item.Quantity,
+              item.Price,
+              orderId,
+              item.Remark || '',
+              item.ModifierCode || '',
+              JSON.stringify(item.SelectedAddOns || []),
+              isTakeAway ? 1 : 0
+            ], (err, result) => {
+              if (err) {
+                console.error('Failed to insert into sales_items:', err);
+                reject(err);
+              } else {
+                resolve(result);
+              }
+            });
+          });
+        });
+
+        Promise.all(insertSalesItemsPromises)
+          .then(() => {
             const insertInvoicesQuery = `
-              INSERT INTO invoices (OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, discountCode, discountName, discountType, TenderedCash, Changes) 
+              INSERT INTO invoices (
+                OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, 
+                ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, 
+                discountCode, discountName, discountType, TenderedCash, Changes
+              ) 
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
             `;
-              
-            const netTotal = totalPrice - discount + serviceCharge + rounding;
 
-            const orderItemsJson = JSON.stringify(orderItems.map(item => ({
-              ...item,
-              SelectedAddOns: item.SelectedAddOns || []
-            })));
+            const orderItemsJson = JSON.stringify(
+              orderItems.map((item) => ({
+                ...item,
+                SelectedAddOns: item.SelectedAddOns || []
+              }))
+            );
 
-            db.query(insertInvoicesQuery, 
-              [orderId, totalItemPrice, JSON.stringify(paymentDetails), discount, serviceCharge, rounding, orderItemsJson, userName, finalPrice, tableName, isTakeAway ? 1 : 0, discountCode, discountName, discountType, tenderedCash, changes], 
-              (err, result) => {
+            connection.query(insertInvoicesQuery, [
+              orderId,
+              totalItemPrice,
+              JSON.stringify(paymentDetails),
+              discount,
+              serviceCharge,
+              rounding,
+              orderItemsJson,
+              userName,
+              finalPrice,
+              tableName,
+              isTakeAway ? 1 : 0,
+              discountCode,
+              discountName,
+              discountType,
+              tenderedCash,
+              changes
+            ], (err, result) => {
+              if (err) {
+                console.error('Failed to insert into invoices:', err);
+                return connection.rollback(() => {
+                  connection.release();
+                  res.status(500).send('Failed to insert invoices');
+                });
+              }
+
+              connection.commit((err) => {
                 if (err) {
-                  console.error('Failed to insert into invoices:', err);
-                  return db.rollback(() => res.status(500).send('Failed to insert invoices'));
+                  console.error('Failed to commit transaction:', err);
+                  return connection.rollback(() => {
+                    connection.release();
+                    res.status(500).send('Failed to commit transaction');
+                  });
                 }
 
-                const insertReprintQuery = `
-                  INSERT INTO reprint_invoices (order_id, invoice_details, IsTakeAway) 
-                  VALUES (?, ?, ?)
-                `;
-                db.query(insertReprintQuery, 
-                  [orderId, JSON.stringify({ orderItems, totalPrice, paymentDetails, discount, serviceCharge, userName, isTakeAway, tenderedCash, changes }), isTakeAway ? 1 : 0],
-                  (err, result) => {
-                    if (err) {
-                      console.error('Failed to insert into reprint_invoices:', err);
-                      return res.status(500).send('Failed to insert reprint invoice');
-                    }
+                connection.release();
+                res.status(200).send('Sales data inserted successfully');
+              });
+            });
+          })
+          .catch((err) => {
+            console.error('Error processing sales items:', err);
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to insert sales items');
+            });
+          });
+      });
+    });
+  });
+});
 
-                    res.status(200).send('Sales data and reprint details inserted successfully');
-                  }
-                );
-              }
-            );
-          }
-        }
-      );
+// Insert into heehee_order table
+app.post('/heehee_orders/saveOrUpdate', (req, res) => {
+  const {
+    OrderId,
+    OrderDate,
+    TotalPrice,
+    Items,
+    Discount,
+    FinalPrice,
+    Ordered,
+    TableName,
+    IsTakeAway,
+  } = req.body;
+
+  // Set Branch as "Heehee" by default
+  const Branch = "Heehee";
+
+  // Ensure mandatory fields are provided
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  // Prepare the SQL query
+  const query = `
+    INSERT INTO heehee_order (
+      OrderId,
+      OrderDate,
+      TotalPrice,
+      Items,
+      Discount,
+      FinalPrice,
+      Ordered,
+      TableName,
+      IsTakeAway,
+      Branch
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      OrderDate = VALUES(OrderDate),
+      TotalPrice = VALUES(TotalPrice),
+      Items = VALUES(Items),
+      Discount = VALUES(Discount),
+      FinalPrice = VALUES(FinalPrice),
+      Ordered = VALUES(Ordered),
+      TableName = VALUES(TableName),
+      IsTakeAway = VALUES(IsTakeAway),
+      Branch = VALUES(Branch)
+  `;
+  
+  // Execute the query
+  db.query(
+    query,
+    [
+      OrderId,
+      OrderDate,
+      TotalPrice,
+      JSON.stringify(Items), // Save Items as JSON string
+      Discount,
+      FinalPrice,
+      Ordered ? 1 : 0,
+      TableName || null,
+      IsTakeAway ? 1 : 0,
+      Branch, // Always insert as "Heehee"
+    ],
+    (err, result) => {
+      if (err) {
+        console.error('Failed to insert or update heehee_order:', err);
+        return res.status(500).send('Failed to insert or update heehee_order');
+      }
+
+      res.status(200).send({ success: true, message: 'Order processed successfully' });
     }
+  );
+});
+
+// Move order from heehee_order to heehee_done
+app.post('/move_order_to_done', (req, res) => {
+  const { OrderId } = req.body;
+
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
+      }
+
+      // Fetch the order from heehee_order
+      const selectQuery = `SELECT * FROM heehee_order WHERE OrderId = ?`;
+      connection.query(selectQuery, [OrderId], (err, results) => {
+        if (err) {
+          console.error('Failed to fetch order from heehee_order:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to fetch order from heehee_order');
+          });
+        }
+
+        if (results.length === 0) {
+          console.error(`Order with OrderId ${OrderId} not found in heehee_order`);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(404).send('Order not found');
+          });
+        }
+
+        const orderData = results[0];
+
+        // Insert the order into heehee_done
+        const insertDoneQuery = `
+          INSERT INTO heehee_done (
+            OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice,
+            Ordered, TableName, IsTakeAway, Branch
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        connection.query(
+          insertDoneQuery,
+          [
+            orderData.OrderId,
+            orderData.OrderDate,
+            orderData.TotalPrice,
+            orderData.Items,
+            orderData.Discount,
+            orderData.FinalPrice,
+            orderData.Ordered,
+            orderData.TableName,
+            orderData.IsTakeAway,
+            orderData.Branch,
+          ],
+          (err, result) => {
+            if (err) {
+              console.error('Failed to insert into heehee_done:', err);
+              return connection.rollback(() => {
+                connection.release();
+                res.status(500).send('Failed to move order to heehee_done');
+              });
+            }
+
+            // Delete the order from heehee_order
+            const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
+            connection.query(deleteQuery, [OrderId], (err, result) => {
+              if (err) {
+                console.error('Failed to delete order from heehee_order:', err);
+                return connection.rollback(() => {
+                  connection.release();
+                  res.status(500).send('Failed to delete order from heehee_order');
+                });
+              }
+
+              // Commit the transaction
+              connection.commit((err) => {
+                if (err) {
+                  console.error('Failed to commit transaction:', err);
+                  return connection.rollback(() => {
+                    connection.release();
+                    res.status(500).send('Failed to commit transaction');
+                  });
+                }
+
+                connection.release();
+                res.status(200).send({
+                  success: true,
+                  message: `Order with OrderId ${OrderId} moved to heehee_done successfully`,
+                });
+              });
+            });
+          }
+        );
+      });
+    });
+  });
+});
+
+
+app.post('/heehee_orders/delete', (req, res) => {
+  const { TableName } = req.body;
+
+  if (!TableName) {
+    return res.status(400).send('TableName is required');
+  }
+
+  const query = `DELETE FROM heehee_order WHERE TableName = ?`;
+
+  db.query(query, [TableName], (err, result) => {
+    if (err) {
+      console.error('Failed to delete Heehee order:', err);
+      return res.status(500).send('Failed to delete Heehee order');
+    }
+
+    if (result.affectedRows > 0) {
+      res.status(200).send({ success: true });
+    } else {
+      res.status(404).send({ success: false, message: 'No order found to delete' });
+    }
+  });
+});
+
+app.get('/heehee_orders/fetchAll', (req, res) => {
+  const query = `
+    SELECT * FROM heehee_order
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch Heehee orders:', err);
+      return res.status(500).send('Failed to fetch Heehee orders');
+    }
+
+    res.status(200).send(results);
+  });
+});
+
+// Fetch all records from heehee_done table
+app.get('/heehee_done/fetchAll', (req, res) => {
+  const query = `
+    SELECT * FROM heehee_done
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch Heehee done orders:', err);
+      return res.status(500).send('Failed to fetch Heehee done orders');
+    }
+
+    res.status(200).send(results);
   });
 });
 
@@ -1618,6 +1923,7 @@ app.post('/1login', (req, res) => {
   }
 
   const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
+  console.log('Executing query:', query, [staffCode, password]);
 
   // Use pool.query for executing the SQL query
   db.query(query, [staffCode, password], (err, results) => {
@@ -1630,6 +1936,8 @@ app.post('/1login', (req, res) => {
       });
     }
 
+    console.log('Query results:', results);
+
     // Check if any results are returned
     if (results.length > 0) {
       console.log('Login successful for staffCode:', staffCode);
@@ -1641,12 +1949,11 @@ app.post('/1login', (req, res) => {
   });
 });
 
-// Fetch items grouped by category with DepartmentID
 app.get('/1items', (req, res) => {
   const query = `
-    SELECT Category, ItemCode, ItemName, Price, DepartmentID
+    SELECT Category, ItemCode, ItemName, Price, DepartmentID, Branch
     FROM items
-    WHERE IsInactive = 0
+    WHERE IsInactive = 0 
     ORDER BY Category, ItemName;
   `;
 
@@ -1655,6 +1962,7 @@ app.get('/1items', (req, res) => {
       console.error('Error executing query:', err);
       return res.status(500).send({ success: false, message: 'Internal server error' });
     }
+    console.log('Fetched Heehee Items:', results); // Debug the items fetched
     const groupedItems = results.reduce((acc, item) => {
       if (!acc[item.Category]) {
         acc[item.Category] = [];
@@ -1663,14 +1971,14 @@ app.get('/1items', (req, res) => {
         itemCode: item.ItemCode,
         itemName: item.ItemName,
         price: item.Price,
-        departmentId: item.DepartmentID, // Include the DepartmentID
+        departmentId: item.DepartmentID,
+        branch: item.Branch, // Ensure branch is included here
       });
       return acc;
     }, {});
     res.status(200).send(groupedItems);
   });
 });
-
 
 
 app.post('/1tables', (req, res) => {
