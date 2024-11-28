@@ -63,6 +63,24 @@ app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
 
+// Fetch glass status
+app.get('/glass-status', (req, res) => {
+  const query = 'SELECT called FROM glass_pickup_status WHERE id = 1';
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error fetching glass status:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    if (result.length > 0) {
+      res.status(200).send({ success: true, called: result[0].called });
+    } else {
+      res.status(404).send({ success: false, message: 'Glass status not found' });
+    }
+  });
+});
+
 // Update the glass status
 app.put('/glass-status', (req, res) => {
   const { called } = req.body;
