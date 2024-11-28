@@ -58,13 +58,7 @@ function broadcastUpdate(update) {
     }
   });
 }
-function broadcastGlassStatus(called) {
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ called }));
-    }
-  });
-}
+
 app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
@@ -2516,7 +2510,23 @@ wss.on('connection', (ws) => {
   console.log('New WebSocket client connected');
 
   ws.on('message', (message) => {
-    console.log('Received message:', message);
+    try {
+      const update = JSON.parse(message);
+      
+      if (update.action === 'table_update') {
+        console.log(`Table update received: Table ${update.id} is now ${update.status}`);
+        // Optionally handle table updates in the server
+        broadcastUpdate(update); // Broadcast the update to all clients
+      } else if (update.action === 'glass_status_update') {
+        console.log(`Glass status update received: ${update.called === 1 ? 'Waiting for Pickup' : 'Picked Up'}`);
+        // Optionally handle glass status updates in the server
+        broadcastUpdate(update); // Broadcast the update to all clients
+      } else {
+        console.log('Unknown action:', update.action);
+      }
+    } catch (err) {
+      console.error('Error processing WebSocket message:', err);
+    }
   });
 
   ws.on('close', () => {
