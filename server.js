@@ -63,6 +63,29 @@ app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
 
+// Update the glass status
+app.put('/glass-status', (req, res) => {
+  const { called } = req.body;
+
+  if (typeof called !== 'number' || (called !== 0 && called !== 1)) {
+    return res.status(400).send({ success: false, message: 'Invalid status value. "called" must be 0 or 1.' });
+  }
+
+  const query = `
+    UPDATE glass_pickup_status
+    SET called = ?
+    WHERE id = 1
+  `;
+
+  db.query(query, [called], (err) => {
+    if (err) {
+      console.error('Error updating glass status:', err);
+      return res.status(500).send({ success: false, message: 'Error updating glass status' });
+    }
+    res.status(200).send({ success: true, message: 'Glass status updated successfully' });
+  });
+});
+
 
 app.post('/login', (req, res) => {
   const { staffCode, password } = req.body;
