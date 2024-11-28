@@ -58,7 +58,13 @@ function broadcastUpdate(update) {
     }
   });
 }
-
+function broadcastGlassStatus(called) {
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ called }));
+    }
+  });
+}
 app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
