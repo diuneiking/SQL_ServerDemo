@@ -191,9 +191,9 @@ app.get('/heehee_items/:category', (req, res) => {
 });
 
 
-// Fetch categories
+// Fetch categories sorted by CategoryID
 app.get('/categories', (req, res) => {
-  const query = 'SELECT * FROM categories WHERE IsInactive = 0';
+  const query = 'SELECT * FROM categories WHERE IsInactive = 0 ORDER BY CategoryID ASC';
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
@@ -202,6 +202,7 @@ app.get('/categories', (req, res) => {
     res.send(results);
   });
 });
+
 // Fetch items by category
 app.get('/items/:category', (req, res) => {
   const category = req.params.category;
