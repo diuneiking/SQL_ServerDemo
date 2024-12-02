@@ -2105,7 +2105,7 @@ app.post('/1login', (req, res) => {
 
 app.get('/1items', (req, res) => {
   const query = `
-    SELECT Category, ItemCode, ItemName, Price, DepartmentID, Branch
+    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch
     FROM items
     WHERE IsInactive = 0 
     ORDER BY Category, ItemName;
@@ -2124,6 +2124,7 @@ app.get('/1items', (req, res) => {
       acc[item.Category].push({
         itemCode: item.ItemCode,
         itemName: item.ItemName,
+        itemAlias: item.ItemAlias, // Include ItemAlias here
         price: item.Price,
         departmentId: item.DepartmentID,
         branch: item.Branch, // Ensure branch is included here
