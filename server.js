@@ -2116,7 +2116,7 @@ app.get('/1items', (req, res) => {
       console.error('Error executing query:', err);
       return res.status(500).send({ success: false, message: 'Internal server error' });
     }
-    console.log('Fetched Heehee Items:', results); // Debug the items fetched
+   
     const groupedItems = results.reduce((acc, item) => {
       if (!acc[item.Category]) {
         acc[item.Category] = [];
