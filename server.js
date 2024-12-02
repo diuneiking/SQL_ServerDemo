@@ -237,9 +237,9 @@ app.get('/items', (req, res) => {
 
 // Fetch modifiers
 app.get('/modifiers', (req, res) => {
-  const query = 'SELECT * FROM modifiers';
-  
-  db.query(query, (err, results) => {
+  const query = 'SELECT * FROM modifiers WHERE Branch = ?';
+
+  db.query(query, ['Heehee'], (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
       return;
@@ -247,6 +247,7 @@ app.get('/modifiers', (req, res) => {
     res.send(results);
   });
 });
+
 
 // Fetch item add-ons by multiple modifier codes
 app.get('/item_add_ons', (req, res) => {
@@ -262,9 +263,9 @@ app.get('/item_add_ons', (req, res) => {
   // Create placeholders for SQL query
   const placeholders = codesArray.map(() => '?').join(',');
 
-  const query = `SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders})`;
-  
-  db.query(query, codesArray, (err, results) => {
+  const query = `SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders}) AND Branch = ?`;
+
+  db.query(query, [...codesArray, 'Heehee'], (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
       return;
