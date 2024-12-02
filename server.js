@@ -248,12 +248,23 @@ app.get('/modifiers', (req, res) => {
   });
 });
 
-// Fetch item add-ons by modifier code
-app.get('/item_add_ons/:modifierCode', (req, res) => {
-  const modifierCode = req.params.modifierCode;
-  const query = 'SELECT * FROM item_add_ons WHERE ModifierCode = ?';
+// Fetch item add-ons by multiple modifier codes
+app.get('/item_add_ons', (req, res) => {
+  const modifierCodes = req.query.modifierCodes; // Expecting a comma-separated list of modifier codes
   
-  db.query(query, [modifierCode], (err, results) => {
+  if (!modifierCodes) {
+    return res.status(400).send({ success: false, message: 'modifierCodes is required' });
+  }
+
+  // Convert comma-separated string into an array
+  const codesArray = modifierCodes.split(',');
+
+  // Create placeholders for SQL query
+  const placeholders = codesArray.map(() => '?').join(',');
+
+  const query = `SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders})`;
+  
+  db.query(query, codesArray, (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
       return;
@@ -261,6 +272,8 @@ app.get('/item_add_ons/:modifierCode', (req, res) => {
     res.send(results);
   });
 });
+
+
 
 // Fetch active discounts
 app.get('/discounts', (req, res) => {
