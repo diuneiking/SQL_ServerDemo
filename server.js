@@ -2322,7 +2322,7 @@ app.get('/1items/:itemCode/modifiers_addons', (req, res) => {
   const query = `
     SELECT m.ModifierCode, m.Modifier, m.IsSingle, ia.AddOnID, ia.AddOnName, ia.AddOnPrice
     FROM items i
-    JOIN modifiers m ON i.ModifierCode = m.ModifierCode
+    JOIN modifiers m ON FIND_IN_SET(m.ModifierCode, i.ModifierCode) > 0
     JOIN item_add_ons ia ON m.ModifierCode = ia.ModifierCode
     WHERE i.ItemCode = ?;
   `;
@@ -2336,6 +2336,7 @@ app.get('/1items/:itemCode/modifiers_addons', (req, res) => {
     res.status(200).send({ success: true, data: results });
   });
 });
+
 
 // Save order to unpaid_orders
 app.post('/1unpaid_orders/saveOrUpdate', (req, res) => {
