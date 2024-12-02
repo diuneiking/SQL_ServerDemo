@@ -932,6 +932,79 @@ app.post('/move_order_to_done', (req, res) => {
   });
 });
 
+// Delete order from heehee_order
+app.post('/heehee_orders/void', (req, res) => {
+  const { OrderId } = req.body;
+
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
+      }
+
+      // Check if the order exists in heehee_order
+      const selectQuery = `SELECT * FROM heehee_order WHERE OrderId = ?`;
+      connection.query(selectQuery, [OrderId], (err, results) => {
+        if (err) {
+          console.error('Failed to fetch order from heehee_order:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to fetch order from heehee_order');
+          });
+        }
+
+        if (results.length === 0) {
+          console.error(`Order with OrderId ${OrderId} not found in heehee_order`);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(404).send('Order not found');
+          });
+        }
+
+        // Delete the order from heehee_order
+        const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
+        connection.query(deleteQuery, [OrderId], (err, result) => {
+          if (err) {
+            console.error('Failed to delete order from heehee_order:', err);
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to delete order from heehee_order');
+            });
+          }
+
+          // Commit the transaction
+          connection.commit((err) => {
+            if (err) {
+              console.error('Failed to commit transaction:', err);
+              return connection.rollback(() => {
+                connection.release();
+                res.status(500).send('Failed to commit transaction');
+              });
+            }
+
+            connection.release();
+            res.status(200).send({
+              success: true,
+              message: `Order with OrderId ${OrderId} successfully voided`,
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
 
 app.post('/heehee_orders/delete', (req, res) => {
   const { TableName } = req.body;
