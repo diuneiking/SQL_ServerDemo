@@ -1932,21 +1932,15 @@ app.put('/update_order_table_name', (req, res) => {
 });
 
 app.get('/end-day-history', (req, res) => {
-  const { date } = req.query; // Get the selected date as a query parameter
-
-  const query = `
-    SELECT * FROM end_day 
-    WHERE DATE_FORMAT(StartTime, '%Y-%m-%d') = ?
-  `;
-
-  db.query(query, [date], (err, results) => {
-    if (err) {
-      console.error('Failed to fetch end day history:', err);
-      res.status(500).json({ success: false, message: 'Database query error' });
-    } else {
-      res.json(results);
-    }
-  });
+    const query = 'SELECT * FROM end_day ORDER BY StartTime DESC';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Failed to fetch end-day history:', err);
+            res.status(500).json({ success: false, message: 'Database query error' });
+        } else {
+            res.json(results);
+        }
+    });
 });
 
 
