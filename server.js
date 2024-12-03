@@ -1931,6 +1931,25 @@ app.put('/update_order_table_name', (req, res) => {
   });
 });
 
+app.get('/end-day-history', (req, res) => {
+  const { date } = req.query; // Get the selected date as a query parameter
+
+  const query = `
+    SELECT * FROM end_day 
+    WHERE DATE_FORMAT(StartTime, '%Y-%m-%d') = ?
+  `;
+
+  db.query(query, [date], (err, results) => {
+    if (err) {
+      console.error('Failed to fetch end day history:', err);
+      res.status(500).json({ success: false, message: 'Database query error' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
 // Endpoint to check if a day entry exists for today
 app.get('/check_day_entry_exists', (req, res) => {
   const today = new Date().toISOString().slice(0, 10); // Get today's date in YYYY-MM-DD format
