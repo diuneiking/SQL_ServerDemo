@@ -413,7 +413,7 @@ app.get('/sales_items/total_quantity', (req, res) => {
 });
 
 // Fetch total number of customers where ShiftEnded = 1
-app.get('/sales_items/total_customers', (req, res) => {
+app.get('_items/total_customers', (req, res) => {
   const query = `
     SELECT COUNT(DISTINCT s.SalesId) AS TotalCustomers
     FROM sales s
@@ -1520,6 +1520,24 @@ app.get('/sales/:completedBy', (req, res) => {
     res.send(results);
   });
 });
+
+app.get('/sales/waitingendday', (req, res) => {
+  // SQL query to fetch sales where ShiftEnded = 1 AND Ended_day = 0
+  const query = `
+    SELECT * 
+    FROM sales 
+    WHERE ShiftEnded = 1 AND Ended_day = 0
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales:', err);
+      return res.status(500).send({ success: false, message: 'Failed to fetch sales' });
+    }
+    res.send(results); // Send the filtered results
+  });
+});
+
 
 app.put('/sales/end_shift/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
