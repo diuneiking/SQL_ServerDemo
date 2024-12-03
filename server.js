@@ -1555,11 +1555,18 @@ app.put('/sales/end_shift/:completedBy', (req, res) => {
 });
 
 app.get('/sales', (req, res) => {
-  const shiftEnded = req.query.shiftEnded; // Get the shiftEnded parameter from the query string
+  const shiftEnded = req.query.shiftEnded; // Get the ShiftEnded parameter
+  const endedDay = req.query.endedDay; // Get the Ended_day parameter
 
-  const query = 'SELECT * FROM sales WHERE ShiftEnded = ?';
-  
-  db.query(query, [shiftEnded], (err, results) => {
+  // Add dynamic condition for Ended_day
+  const query = `
+    SELECT * 
+    FROM sales 
+    WHERE ShiftEnded = ? 
+    AND Ended_day = ?
+  `;
+
+  db.query(query, [shiftEnded, endedDay], (err, results) => {
     if (err) {
       console.error('Failed to fetch sales:', err);
       res.status(500).json({ success: false, message: 'Database query error' });
@@ -1568,6 +1575,7 @@ app.get('/sales', (req, res) => {
     }
   });
 });
+
 
 // Endpoint to fetch payouts with IsEndOfDay and ShiftEnded status
 app.get('/payouts', (req, res) => {
