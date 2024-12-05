@@ -1,3 +1,4 @@
+
 const express = require('express');
 const mysql = require('mysql2');
 const bodyParser = require('body-parser');
@@ -11,28 +12,37 @@ const port = 3000;
 // Middleware
 app.use(bodyParser.json());
 app.use(cors());
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
 const db = mysql.createPool({
-  host: '82.197.82.65',
-  user: 'u461355420_hidden',
-  password: 'Hidden@2024',
-  database: 'u461355420_hl',
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
 
-// Database connection
+// // Database connection
 // const db = mysql.createPool({
-//   host: 'localhost',
-//   user: 'root',
-//   password: '8811967z',
-//   database: 'gnik',
+//   host: 'srv1627.hstgr.io',
+//   user: 'u461355420_hidden',
+//   password: 'Hidden@2024',
+//   database: 'u461355420_hl',
 //   waitForConnections: true,
 //   connectionLimit: 10,
 //   queueLimit: 0
 // });
+
+
+// Logging middleware for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Request Body:', req.body);
+  next();
+});
 
 // Create an HTTP server
 const server = http.createServer(app);
@@ -48,6 +58,51 @@ function broadcastUpdate(update) {
     }
   });
 }
+
+app.get('/', (req, res) => {
+  res.send({ message: 'Server is running' });
+});
+
+// Fetch glass status
+app.get('/glass-status', (req, res) => {
+  const query = 'SELECT called FROM glass_pickup_status WHERE id = 1';
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error fetching glass status:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    if (result.length > 0) {
+      res.status(200).send({ success: true, called: result[0].called });
+    } else {
+      res.status(404).send({ success: false, message: 'Glass status not found' });
+    }
+  });
+});
+
+// Update the glass status
+app.put('/glass-status', (req, res) => {
+  const { called } = req.body;
+
+  if (typeof called !== 'number' || (called !== 0 && called !== 1)) {
+    return res.status(400).send({ success: false, message: 'Invalid status value. "called" must be 0 or 1.' });
+  }
+
+  const query = `
+    UPDATE glass_pickup_status
+    SET called = ?
+    WHERE id = 1
+  `;
+
+  db.query(query, [called], (err) => {
+    if (err) {
+      console.error('Error updating glass status:', err);
+      return res.status(500).send({ success: false, message: 'Error updating glass status' });
+    }
+    res.status(200).send({ success: true, message: 'Glass status updated successfully' });
+  });
+});
 
 
 app.post('/login', (req, res) => {
@@ -97,9 +152,48 @@ app.post('/admin_login', (req, res) => {
   });
 });
 
-// Fetch categories
+// Fetch categories for Heehee branch
+app.get('/heehee_categories', (req, res) => {
+  const query = `
+    SELECT DISTINCT items.Category
+    FROM items
+    WHERE items.Branch = 'Heehee' AND items.IsInactive = 0
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching Heehee categories:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results.map(result => result.Category)); // Send only category names
+    }
+  });
+});
+
+// Fetch items by category and Branch = Heehee
+app.get('/heehee_items/:category', (req, res) => {
+  const category = req.params.category;
+  const query = `
+    SELECT items.*, department.DepartmentName
+    FROM items
+    LEFT JOIN department ON items.DepartmentID = department.DepartmentID
+    WHERE items.Branch = 'Heehee' AND items.Category = ? AND items.IsInactive = 0
+  `;
+
+  db.query(query, [category], (err, results) => {
+    if (err) {
+      console.error('Error fetching Heehee items:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
+// Fetch categories sorted by CategoryID
 app.get('/categories', (req, res) => {
-  const query = 'SELECT * FROM categories WHERE IsInactive = 0';
+  const query = 'SELECT * FROM categories WHERE IsInactive = 0 ORDER BY CategoryID ASC';
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
@@ -108,6 +202,7 @@ app.get('/categories', (req, res) => {
     res.send(results);
   });
 });
+
 // Fetch items by category
 app.get('/items/:category', (req, res) => {
   const category = req.params.category;
@@ -127,9 +222,9 @@ app.get('/items/:category', (req, res) => {
   });
 });
 
-// Fetch all items from the items table
+// Fetch items from the items table where Branch = "Heehee"
 app.get('/items', (req, res) => {
-  const query = 'SELECT * FROM items WHERE IsInactive = 0';
+  const query = 'SELECT * FROM items WHERE Branch = "Heehee"';
   db.query(query, (err, results) => {
     if (err) {
       console.error('Error fetching items:', err);
@@ -140,11 +235,12 @@ app.get('/items', (req, res) => {
   });
 });
 
+
 // Fetch modifiers
 app.get('/modifiers', (req, res) => {
-  const query = 'SELECT * FROM modifiers';
-  
-  db.query(query, (err, results) => {
+  const query = 'SELECT * FROM modifiers WHERE Branch = ?';
+
+  db.query(query, ['Heehee'], (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
       return;
@@ -153,12 +249,24 @@ app.get('/modifiers', (req, res) => {
   });
 });
 
-// Fetch item add-ons by modifier code
-app.get('/item_add_ons/:modifierCode', (req, res) => {
-  const modifierCode = req.params.modifierCode;
-  const query = 'SELECT * FROM item_add_ons WHERE ModifierCode = ?';
+
+// Fetch item add-ons by multiple modifier codes
+app.get('/item_add_ons', (req, res) => {
+  const modifierCodes = req.query.modifierCodes; // Expecting a comma-separated list of modifier codes
   
-  db.query(query, [modifierCode], (err, results) => {
+  if (!modifierCodes) {
+    return res.status(400).send({ success: false, message: 'modifierCodes is required' });
+  }
+
+  // Convert comma-separated string into an array
+  const codesArray = modifierCodes.split(',');
+
+  // Create placeholders for SQL query
+  const placeholders = codesArray.map(() => '?').join(',');
+
+  const query = `SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders}) AND Branch = ?`;
+
+  db.query(query, [...codesArray, 'Heehee'], (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
       return;
@@ -166,6 +274,8 @@ app.get('/item_add_ons/:modifierCode', (req, res) => {
     res.send(results);
   });
 });
+
+
 
 // Fetch active discounts
 app.get('/discounts', (req, res) => {
@@ -303,8 +413,37 @@ app.get('/sales_items/total_quantity', (req, res) => {
   });
 });
 
+// Fetch total quantity of items sold for a specific date where ShiftEnded = 1
+app.get('/sales_items/total_quantity_by_date', (req, res) => {
+  const { date } = req.query; // Get the date from the query parameters
+
+  if (!date) {
+    res.status(400).send({ success: false, message: 'Date parameter is required' });
+    return;
+  }
+
+  const query = `
+    SELECT SUM(si.Quantity) AS TotalQuantity
+    FROM sales_items si
+    JOIN sales s ON si.SalesId = s.SalesId
+    WHERE s.ShiftEnded = 1 AND DATE(s.OrderDate) = ?
+  `;
+
+  db.query(query, [date], (err, results) => {
+    if (err) {
+      console.error('Error fetching total item quantity for date:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+
+    const totalQuantity = results[0]?.TotalQuantity || 0; // Default to 0 if no rows are returned
+    res.json({ success: true, totalQuantity });
+  });
+});
+
+
 // Fetch total number of customers where ShiftEnded = 1
-app.get('/sales_items/total_customers', (req, res) => {
+app.get('_items/total_customers', (req, res) => {
   const query = `
     SELECT COUNT(DISTINCT s.SalesId) AS TotalCustomers
     FROM sales s
@@ -469,7 +608,6 @@ app.get('/payment_methods', (req, res) => {
   });
 });
 
-// Insert into sales table
 app.post('/insert_sales_data', (req, res) => {
   const {
     orderId,
@@ -482,11 +620,11 @@ app.post('/insert_sales_data', (req, res) => {
     completedBy: userName,
     tableName,
     isTakeAway,
-    discountCode,   // New field
-    discountName,   // New field
-    discountType,   // New field
-    tenderedCash,   // Tendered cash from client
-    changes         // Changes from client (renamed from Change)
+    discountCode,
+    discountName,
+    discountType,
+    tenderedCash,
+    changes
   } = req.body;
 
   if (!userName) {
@@ -494,109 +632,475 @@ app.post('/insert_sales_data', (req, res) => {
     return res.status(400).send('CompletedBy field is required');
   }
 
-  const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge; // Only apply service charge if not take away
+  if (!orderItems || orderItems.length === 0) {
+    console.error('Order items are empty');
+    return res.status(400).send('Order items cannot be empty');
+  }
+
+  const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
+  console.log('Received Order Items:', orderItems);
 
   const insertSalesQuery = `
-    INSERT INTO sales (OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, discountName, discountType, TenderedCash, Changes) 
+    INSERT INTO sales (
+      OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
+      ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
+      discountName, discountType, TenderedCash, Changes
+    ) 
     VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
-  // Calculate total price as the sum of all order item prices
   const totalItemPrice = orderItems.reduce((sum, item) => sum + item.Price * item.Quantity, 0);
-
-  // Final price after applying discount, service charge, and rounding
   const finalPrice = totalItemPrice - discount + calculatedServiceCharge + rounding;
 
-  db.query(insertSalesQuery, [
-    orderId,
-    totalItemPrice,
-    finalPrice,
-    JSON.stringify(paymentDetails),
-    discount,
-    calculatedServiceCharge,
-    rounding,
-    userName,
-    tableName,
-    isTakeAway ? 1 : 0,
-    discountCode,
-    discountName,
-    discountType,
-    tenderedCash,   // Add tenderedCash to the query
-    changes         // Add changes to the query
-  ], (err, result) => {
+  db.getConnection((err, connection) => {
     if (err) {
-      console.error('Failed to insert into sales:', err);
-      return res.status(500).send('Failed to insert sales data');
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
     }
 
-    const salesId = result.insertId;
-
-    // Insert into sales_items table
-    const insertSalesItemsQuery = `
-      INSERT INTO sales_items (SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    let itemsProcessed = 0;
-    for (let item of orderItems) {
-      if (!item.ItemCode || !item.ItemName || item.Quantity == null || item.Price == null) {
-        console.error('Missing mandatory data in item:', item);
-        return res.status(400).send('Invalid data in order items');
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
       }
 
-      const addOnsJson = JSON.stringify(item.SelectedAddOns || []);
+      connection.query(insertSalesQuery, [
+        orderId,
+        totalItemPrice,
+        finalPrice,
+        JSON.stringify(paymentDetails),
+        discount,
+        calculatedServiceCharge,
+        rounding,
+        userName,
+        tableName,
+        isTakeAway ? 1 : 0,
+        discountCode,
+        discountName,
+        discountType,
+        tenderedCash,
+        changes
+      ], (err, result) => {
+        if (err) {
+          console.error('Failed to insert into sales:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to insert sales data');
+          });
+        }
 
-      db.query(insertSalesItemsQuery, 
-        [salesId, item.ItemCode, item.ItemName, item.Quantity, item.Price, orderId, item.Remark || '', item.ModifierCode || '', addOnsJson, isTakeAway ? 1 : 0], 
-        (err, result) => {
-          if (err) {
-            console.error('Failed to insert into sales_items:', err);
-            return res.status(500).send('Failed to insert sales items');
-          }
+        const salesId = result.insertId;
 
-          itemsProcessed++;
-          if (itemsProcessed === orderItems.length) {
+        const insertSalesItemsPromises = orderItems.map((item) => {
+          const insertSalesItemsQuery = `
+            INSERT INTO sales_items (
+              SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          return new Promise((resolve, reject) => {
+            connection.query(insertSalesItemsQuery, [
+              salesId,
+              item.ItemCode,
+              item.ItemName,
+              item.Quantity,
+              item.Price,
+              orderId,
+              item.Remark || '',
+              item.ModifierCode || '',
+              JSON.stringify(item.SelectedAddOns || []),
+              isTakeAway ? 1 : 0
+            ], (err, result) => {
+              if (err) {
+                console.error('Failed to insert into sales_items:', err);
+                reject(err);
+              } else {
+                resolve(result);
+              }
+            });
+          });
+        });
+
+        Promise.all(insertSalesItemsPromises)
+          .then(() => {
             const insertInvoicesQuery = `
-              INSERT INTO invoices (OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, discountCode, discountName, discountType, TenderedCash, Changes) 
+              INSERT INTO invoices (
+                OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, 
+                ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, 
+                discountCode, discountName, discountType, TenderedCash, Changes
+              ) 
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
             `;
-              
-            const netTotal = totalPrice - discount + serviceCharge + rounding;
 
-            const orderItemsJson = JSON.stringify(orderItems.map(item => ({
-              ...item,
-              SelectedAddOns: item.SelectedAddOns || []
-            })));
+            const orderItemsJson = JSON.stringify(
+              orderItems.map((item) => ({
+                ...item,
+                SelectedAddOns: item.SelectedAddOns || []
+              }))
+            );
 
-            db.query(insertInvoicesQuery, 
-              [orderId, totalItemPrice, JSON.stringify(paymentDetails), discount, serviceCharge, rounding, orderItemsJson, userName, finalPrice, tableName, isTakeAway ? 1 : 0, discountCode, discountName, discountType, tenderedCash, changes], 
-              (err, result) => {
+            connection.query(insertInvoicesQuery, [
+              orderId,
+              totalItemPrice,
+              JSON.stringify(paymentDetails),
+              discount,
+              serviceCharge,
+              rounding,
+              orderItemsJson,
+              userName,
+              finalPrice,
+              tableName,
+              isTakeAway ? 1 : 0,
+              discountCode,
+              discountName,
+              discountType,
+              tenderedCash,
+              changes
+            ], (err, result) => {
+              if (err) {
+                console.error('Failed to insert into invoices:', err);
+                return connection.rollback(() => {
+                  connection.release();
+                  res.status(500).send('Failed to insert invoices');
+                });
+              }
+
+              connection.commit((err) => {
                 if (err) {
-                  console.error('Failed to insert into invoices:', err);
-                  return db.rollback(() => res.status(500).send('Failed to insert invoices'));
+                  console.error('Failed to commit transaction:', err);
+                  return connection.rollback(() => {
+                    connection.release();
+                    res.status(500).send('Failed to commit transaction');
+                  });
                 }
 
-                const insertReprintQuery = `
-                  INSERT INTO reprint_invoices (order_id, invoice_details, IsTakeAway) 
-                  VALUES (?, ?, ?)
-                `;
-                db.query(insertReprintQuery, 
-                  [orderId, JSON.stringify({ orderItems, totalPrice, paymentDetails, discount, serviceCharge, userName, isTakeAway, tenderedCash, changes }), isTakeAway ? 1 : 0],
-                  (err, result) => {
-                    if (err) {
-                      console.error('Failed to insert into reprint_invoices:', err);
-                      return res.status(500).send('Failed to insert reprint invoice');
-                    }
+                connection.release();
+                res.status(200).send('Sales data inserted successfully');
+              });
+            });
+          })
+          .catch((err) => {
+            console.error('Error processing sales items:', err);
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to insert sales items');
+            });
+          });
+      });
+    });
+  });
+});
 
-                    res.status(200).send('Sales data and reprint details inserted successfully');
-                  }
-                );
-              }
-            );
-          }
-        }
-      );
+// Insert into heehee_order table
+app.post('/heehee_orders/saveOrUpdate', (req, res) => {
+  const {
+    OrderId,
+    OrderDate,
+    TotalPrice,
+    Items,
+    Discount,
+    FinalPrice,
+    Ordered,
+    TableName,
+    IsTakeAway,
+  } = req.body;
+
+  // Set Branch as "Heehee" by default
+  const Branch = "Heehee";
+
+  // Ensure mandatory fields are provided
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  // Prepare the SQL query
+  const query = `
+    INSERT INTO heehee_order (
+      OrderId,
+      OrderDate,
+      TotalPrice,
+      Items,
+      Discount,
+      FinalPrice,
+      Ordered,
+      TableName,
+      IsTakeAway,
+      Branch
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      OrderDate = VALUES(OrderDate),
+      TotalPrice = VALUES(TotalPrice),
+      Items = VALUES(Items),
+      Discount = VALUES(Discount),
+      FinalPrice = VALUES(FinalPrice),
+      Ordered = VALUES(Ordered),
+      TableName = VALUES(TableName),
+      IsTakeAway = VALUES(IsTakeAway),
+      Branch = VALUES(Branch)
+  `;
+  
+  // Execute the query
+  db.query(
+    query,
+    [
+      OrderId,
+      OrderDate,
+      TotalPrice,
+      JSON.stringify(Items), // Save Items as JSON string
+      Discount,
+      FinalPrice,
+      Ordered ? 1 : 0,
+      TableName || null,
+      IsTakeAway ? 1 : 0,
+      Branch, // Always insert as "Heehee"
+    ],
+    (err, result) => {
+      if (err) {
+        console.error('Failed to insert or update heehee_order:', err);
+        return res.status(500).send('Failed to insert or update heehee_order');
+      }
+
+      res.status(200).send({ success: true, message: 'Order processed successfully' });
     }
+  );
+});
+
+// Move order from heehee_order to heehee_done
+app.post('/move_order_to_done', (req, res) => {
+  const { OrderId } = req.body;
+
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
+      }
+
+      // Fetch the order from heehee_order
+      const selectQuery = `SELECT * FROM heehee_order WHERE OrderId = ?`;
+      connection.query(selectQuery, [OrderId], (err, results) => {
+        if (err) {
+          console.error('Failed to fetch order from heehee_order:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to fetch order from heehee_order');
+          });
+        }
+
+        if (results.length === 0) {
+          console.error(`Order with OrderId ${OrderId} not found in heehee_order`);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(404).send('Order not found');
+          });
+        }
+
+        const orderData = results[0];
+
+        // Insert the order into heehee_done
+        const insertDoneQuery = `
+          INSERT INTO heehee_done (
+            OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice,
+            Ordered, TableName, IsTakeAway, Branch
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        connection.query(
+          insertDoneQuery,
+          [
+            orderData.OrderId,
+            orderData.OrderDate,
+            orderData.TotalPrice,
+            orderData.Items,
+            orderData.Discount,
+            orderData.FinalPrice,
+            orderData.Ordered,
+            orderData.TableName,
+            orderData.IsTakeAway,
+            orderData.Branch,
+          ],
+          (err, result) => {
+            if (err) {
+              console.error('Failed to insert into heehee_done:', err);
+              return connection.rollback(() => {
+                connection.release();
+                res.status(500).send('Failed to move order to heehee_done');
+              });
+            }
+
+            // Delete the order from heehee_order
+            const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
+            connection.query(deleteQuery, [OrderId], (err, result) => {
+              if (err) {
+                console.error('Failed to delete order from heehee_order:', err);
+                return connection.rollback(() => {
+                  connection.release();
+                  res.status(500).send('Failed to delete order from heehee_order');
+                });
+              }
+
+              // Commit the transaction
+              connection.commit((err) => {
+                if (err) {
+                  console.error('Failed to commit transaction:', err);
+                  return connection.rollback(() => {
+                    connection.release();
+                    res.status(500).send('Failed to commit transaction');
+                  });
+                }
+
+                connection.release();
+                res.status(200).send({
+                  success: true,
+                  message: `Order with OrderId ${OrderId} moved to heehee_done successfully`,
+                });
+              });
+            });
+          }
+        );
+      });
+    });
+  });
+});
+
+// Delete order from heehee_order
+app.post('/heehee_orders/void', (req, res) => {
+  const { OrderId } = req.body;
+
+  if (!OrderId) {
+    return res.status(400).send('OrderId is required');
+  }
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
+      }
+
+      // Check if the order exists in heehee_order
+      const selectQuery = `SELECT * FROM heehee_order WHERE OrderId = ?`;
+      connection.query(selectQuery, [OrderId], (err, results) => {
+        if (err) {
+          console.error('Failed to fetch order from heehee_order:', err);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(500).send('Failed to fetch order from heehee_order');
+          });
+        }
+
+        if (results.length === 0) {
+          console.error(`Order with OrderId ${OrderId} not found in heehee_order`);
+          return connection.rollback(() => {
+            connection.release();
+            res.status(404).send('Order not found');
+          });
+        }
+
+        // Delete the order from heehee_order
+        const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
+        connection.query(deleteQuery, [OrderId], (err, result) => {
+          if (err) {
+            console.error('Failed to delete order from heehee_order:', err);
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to delete order from heehee_order');
+            });
+          }
+
+          // Commit the transaction
+          connection.commit((err) => {
+            if (err) {
+              console.error('Failed to commit transaction:', err);
+              return connection.rollback(() => {
+                connection.release();
+                res.status(500).send('Failed to commit transaction');
+              });
+            }
+
+            connection.release();
+            res.status(200).send({
+              success: true,
+              message: `Order with OrderId ${OrderId} successfully voided`,
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
+
+app.post('/heehee_orders/delete', (req, res) => {
+  const { TableName } = req.body;
+
+  if (!TableName) {
+    return res.status(400).send('TableName is required');
+  }
+
+  const query = `DELETE FROM heehee_order WHERE TableName = ?`;
+
+  db.query(query, [TableName], (err, result) => {
+    if (err) {
+      console.error('Failed to delete Heehee order:', err);
+      return res.status(500).send('Failed to delete Heehee order');
+    }
+
+    if (result.affectedRows > 0) {
+      res.status(200).send({ success: true });
+    } else {
+      res.status(404).send({ success: false, message: 'No order found to delete' });
+    }
+  });
+});
+
+app.get('/heehee_orders/fetchAll', (req, res) => {
+  const query = `
+    SELECT * FROM heehee_order
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch Heehee orders:', err);
+      return res.status(500).send('Failed to fetch Heehee orders');
+    }
+
+    res.status(200).send(results);
+  });
+});
+
+// Fetch all records from heehee_done table
+app.get('/heehee_done/fetchAll', (req, res) => {
+  const query = `
+    SELECT * FROM heehee_done
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch Heehee done orders:', err);
+      return res.status(500).send('Failed to fetch Heehee done orders');
+    }
+
+    res.status(200).send(results);
   });
 });
 
@@ -1047,6 +1551,24 @@ app.get('/sales/:completedBy', (req, res) => {
   });
 });
 
+app.get('/sales/waitingendday', (req, res) => {
+  // SQL query to fetch sales where ShiftEnded = 1 AND Ended_day = 0
+  const query = `
+    SELECT * 
+    FROM sales 
+    WHERE ShiftEnded = 1 AND Ended_day = 0
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales:', err);
+      return res.status(500).send({ success: false, message: 'Failed to fetch sales' });
+    }
+    res.send(results); // Send the filtered results
+  });
+});
+
+
 app.put('/sales/end_shift/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
   const query = `
@@ -1063,11 +1585,18 @@ app.put('/sales/end_shift/:completedBy', (req, res) => {
 });
 
 app.get('/sales', (req, res) => {
-  const shiftEnded = req.query.shiftEnded; // Get the shiftEnded parameter from the query string
+  const shiftEnded = req.query.shiftEnded; // Get the ShiftEnded parameter
+  const endedDay = req.query.endedDay; // Get the Ended_day parameter
 
-  const query = 'SELECT * FROM sales WHERE ShiftEnded = ?';
-  
-  db.query(query, [shiftEnded], (err, results) => {
+  // Add dynamic condition for Ended_day
+  const query = `
+    SELECT * 
+    FROM sales 
+    WHERE ShiftEnded = ? 
+    AND Ended_day = ?
+  `;
+
+  db.query(query, [shiftEnded, endedDay], (err, results) => {
     if (err) {
       console.error('Failed to fetch sales:', err);
       res.status(500).json({ success: false, message: 'Database query error' });
@@ -1076,6 +1605,7 @@ app.get('/sales', (req, res) => {
     }
   });
 });
+
 
 // Endpoint to fetch payouts with IsEndOfDay and ShiftEnded status
 app.get('/payouts', (req, res) => {
@@ -1431,6 +1961,19 @@ app.put('/update_order_table_name', (req, res) => {
   });
 });
 
+app.get('/end-day-history', (req, res) => {
+    const query = 'SELECT * FROM end_day ORDER BY StartTime DESC';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Failed to fetch end-day history:', err);
+            res.status(500).json({ success: false, message: 'Database query error' });
+        } else {
+            res.json(results);
+        }
+    });
+});
+
+
 // Endpoint to check if a day entry exists for today
 app.get('/check_day_entry_exists', (req, res) => {
   const today = new Date().toISOString().slice(0, 10); // Get today's date in YYYY-MM-DD format
@@ -1608,40 +2151,46 @@ app.put('/shifts-payouts/update', (req, res) => {
 
 // Login route using connection pool
 app.post('/1login', (req, res) => {
-  const { staffCode, password } = req.body;  // Extract staffCode and password from request body
+  const { staffCode, password } = req.body; // Extract staffCode and password from request body
 
   // Ensure staffCode and password are provided
   if (!staffCode || !password) {
+    console.warn('Validation failed: Missing staffCode or password');
     return res.status(400).send({ success: false, message: 'StaffCode and Password are required' });
   }
 
   const query = 'SELECT * FROM staff WHERE StaffCode = ? AND Password = ?';
+  console.log('Executing query:', query, [staffCode, password]);
 
   // Use pool.query for executing the SQL query
   db.query(query, [staffCode, password], (err, results) => {
     if (err) {
-      console.error('Error executing query:', err); // Log the error for debugging
-      return res.status(500).send({ success: false, message: 'Internal server error' });
+      console.error('Database query error:', err.message); // Log the detailed error for debugging
+      return res.status(500).send({ 
+        success: false, 
+        message: 'Internal server error',
+        error: err.message, // Include the error message in response for debugging
+      });
     }
+
+    console.log('Query results:', results);
 
     // Check if any results are returned
     if (results.length > 0) {
-      // Return the first matching user
+      console.log('Login successful for staffCode:', staffCode);
       return res.status(200).send({ success: true, user: results[0] });
     } else {
-      // Return error response if no user is found
+      console.warn('Invalid credentials for staffCode:', staffCode);
       return res.status(401).send({ success: false, message: 'Invalid credentials' });
     }
   });
 });
 
-
-// Fetch items grouped by category with DepartmentID
 app.get('/1items', (req, res) => {
   const query = `
-    SELECT Category, ItemCode, ItemName, Price, DepartmentID
+    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch
     FROM items
-    WHERE IsInactive = 0
+    WHERE IsInactive = 0 
     ORDER BY Category, ItemName;
   `;
 
@@ -1650,6 +2199,7 @@ app.get('/1items', (req, res) => {
       console.error('Error executing query:', err);
       return res.status(500).send({ success: false, message: 'Internal server error' });
     }
+   
     const groupedItems = results.reduce((acc, item) => {
       if (!acc[item.Category]) {
         acc[item.Category] = [];
@@ -1657,15 +2207,16 @@ app.get('/1items', (req, res) => {
       acc[item.Category].push({
         itemCode: item.ItemCode,
         itemName: item.ItemName,
+        itemAlias: item.ItemAlias, // Include ItemAlias here
         price: item.Price,
-        departmentId: item.DepartmentID, // Include the DepartmentID
+        departmentId: item.DepartmentID,
+        branch: item.Branch, // Ensure branch is included here
       });
       return acc;
     }, {});
     res.status(200).send(groupedItems);
   });
 });
-
 
 
 app.post('/1tables', (req, res) => {
@@ -1854,7 +2405,7 @@ app.get('/1items/:itemCode/modifiers_addons', (req, res) => {
   const query = `
     SELECT m.ModifierCode, m.Modifier, m.IsSingle, ia.AddOnID, ia.AddOnName, ia.AddOnPrice
     FROM items i
-    JOIN modifiers m ON i.ModifierCode = m.ModifierCode
+    JOIN modifiers m ON FIND_IN_SET(m.ModifierCode, i.ModifierCode) > 0
     JOIN item_add_ons ia ON m.ModifierCode = ia.ModifierCode
     WHERE i.ItemCode = ?;
   `;
@@ -1868,6 +2419,7 @@ app.get('/1items/:itemCode/modifiers_addons', (req, res) => {
     res.status(200).send({ success: true, data: results });
   });
 });
+
 
 // Save order to unpaid_orders
 app.post('/1unpaid_orders/saveOrUpdate', (req, res) => {
@@ -2117,13 +2669,37 @@ wss.on('connection', (ws) => {
   console.log('New WebSocket client connected');
 
   ws.on('message', (message) => {
-    console.log('Received message:', message);
+    try {
+      const update = JSON.parse(message);
+      
+      if (update.action === 'table_update') {
+        console.log(`Table update received: Table ${update.id} is now ${update.status}`);
+        // Optionally handle table updates in the server
+        broadcastUpdate(update); // Broadcast the update to all clients
+      } else if (update.action === 'glass_status_update') {
+        console.log(`Glass status update received: ${update.called === 1 ? 'Waiting for Pickup' : 'Picked Up'}`);
+        // Optionally handle glass status updates in the server
+        broadcastUpdate(update); // Broadcast the update to all clients
+      } else {
+        console.log('Unknown action:', update.action);
+      }
+    } catch (err) {
+      console.error('Error processing WebSocket message:', err);
+    }
   });
 
   ws.on('close', () => {
     console.log('WebSocket client disconnected');
   });
 });
+
+// Handle undefined routes
+app.use((req, res) => {
+  console.warn(`Undefined route accessed: ${req.method} ${req.url}`);
+  res.status(404).send({ success: false, message: 'Endpoint not found' });
+});
+
+
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
