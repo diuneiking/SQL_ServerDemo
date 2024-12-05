@@ -28,9 +28,9 @@ const db = mysql.createPool({
 // // Database connection
 // const db = mysql.createPool({
 //   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_hidden',
-//   password: 'Hidden@2024',
-//   database: 'u461355420_hl',
+//   user: 'u461355420_superadmin',
+//   password: 'Heehee@2024',
+//   database: 'u461355420_heehee',
 //   waitForConnections: true,
 //   connectionLimit: 10,
 //   queueLimit: 0
@@ -1135,13 +1135,15 @@ app.post('/reverse_order', (req, res) => {
     }
 
     if (results.length === 0) {
+      console.error(`Invoice not found for OrderID: ${orderId}`);
       return res.status(404).send('Invoice not found');
     }
 
     const invoice = results[0];
 
+
     // Convert ItemsDetails to match normal unpaid order format
-    let itemsDetails = JSON.parse(invoice.ItemsDetails);
+    let itemsDetails = JSON.parse(invoice.ItemsDetails || '[]');
     itemsDetails = itemsDetails.map(item => ({
       itemCode: item.ItemCode,
       itemName: item.ItemName,
@@ -1151,9 +1153,11 @@ app.post('/reverse_order', (req, res) => {
       selectedAddOns: item.SelectedAddOns || [],
     }));
 
+
     // Calculate the TotalPrice and FinalPrice without discounts and service charges
     const totalPrice = itemsDetails.reduce((total, item) => total + (item.price * item.quantity), 0);
     const finalPrice = totalPrice;
+
 
     // Proceed to delete from sales_items, sales, and invoices
     const deleteSalesItemsQuery = `
@@ -1192,16 +1196,19 @@ app.post('/reverse_order', (req, res) => {
             VALUES (?, NOW(), ?, ?, ?, ?, ?, ?)
           `;
 
-          db.query(insertUnpaidOrderQuery, [
+          const insertValues = [
             invoice.OrderID,
             totalPrice, // Use calculated totalPrice
             JSON.stringify(itemsDetails), // Insert normalized itemsDetails
-            invoice.Discount, // Keep the original discount value
+            invoice.Discount || 0, // Default to 0 if Discount is null
             finalPrice, // Use the same calculated value as FinalPrice
-            invoice.TableName  // Use the TableName from the original invoice
-          ], (err, result) => {
+            invoice.TableName || 'Unknown', // Default to 'Unknown' if TableName is null
+            invoice.IsTakeAway || 0, // Default to 0 if IsTakeAway is null
+          ];
+
+
+          db.query(insertUnpaidOrderQuery, insertValues, (err, result) => {
             if (err) {
-              console.error('Failed to insert back into unpaid_orders:', err);
               return res.status(500).send('Failed to insert back into unpaid_orders');
             }
 
@@ -1588,7 +1595,6 @@ app.put('/sales/end_day', (req, res) => {
     });
   });
 });
-
 
 app.put('/sales/end_shift/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
