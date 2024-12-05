@@ -1202,7 +1202,7 @@ app.post('/reverse_order', (req, res) => {
             JSON.stringify(itemsDetails), // Insert normalized itemsDetails
             invoice.Discount || 0, // Default to 0 if Discount is null
             finalPrice, // Use the same calculated value as FinalPrice
-            invoice.TableName || 'Unknown', // Default to 'Unknown' if TableName is null
+            invoice.TableName || '-',
             invoice.IsTakeAway || 0, // Default to 0 if IsTakeAway is null
           ];
 
