@@ -222,9 +222,9 @@ app.get('/items/:category', (req, res) => {
   });
 });
 
-// Fetch all items from the items table
+// Fetch items from the items table where Branch = "Heehee"
 app.get('/items', (req, res) => {
-  const query = 'SELECT * FROM items';
+  const query = 'SELECT * FROM items WHERE Branch = "Heehee"';
   db.query(query, (err, results) => {
     if (err) {
       console.error('Error fetching items:', err);
@@ -234,6 +234,7 @@ app.get('/items', (req, res) => {
     }
   });
 });
+
 
 // Fetch modifiers
 app.get('/modifiers', (req, res) => {
