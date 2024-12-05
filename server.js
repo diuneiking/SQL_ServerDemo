@@ -1568,6 +1568,27 @@ app.get('/sales/waitingendday', (req, res) => {
   });
 });
 
+// Update Ended_day = 1 for all sales where ShiftEnded = 1
+app.put('/sales/end_day', (req, res) => {
+  const query = `
+    UPDATE sales 
+    SET Ended_day = 1 
+    WHERE ShiftEnded = 1 AND Ended_day = 0
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Failed to update Ended_day status:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update Ended_day status' });
+    }
+
+    res.send({
+      success: true,
+      message: `End day process completed successfully. ${result.affectedRows} rows updated.`,
+    });
+  });
+});
+
 
 app.put('/sales/end_shift/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
