@@ -412,6 +412,35 @@ app.get('/sales_items/total_quantity', (req, res) => {
   });
 });
 
+// Fetch total quantity of items sold for a specific date where ShiftEnded = 1
+app.get('/sales_items/total_quantity_by_date', (req, res) => {
+  const { date } = req.query; // Get the date from the query parameters
+
+  if (!date) {
+    res.status(400).send({ success: false, message: 'Date parameter is required' });
+    return;
+  }
+
+  const query = `
+    SELECT SUM(si.Quantity) AS TotalQuantity
+    FROM sales_items si
+    JOIN sales s ON si.SalesId = s.SalesId
+    WHERE s.ShiftEnded = 1 AND DATE(s.OrderDate) = ?
+  `;
+
+  db.query(query, [date], (err, results) => {
+    if (err) {
+      console.error('Error fetching total item quantity for date:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+
+    const totalQuantity = results[0]?.TotalQuantity || 0; // Default to 0 if no rows are returned
+    res.json({ success: true, totalQuantity });
+  });
+});
+
+
 // Fetch total number of customers where ShiftEnded = 1
 app.get('_items/total_customers', (req, res) => {
   const query = `
