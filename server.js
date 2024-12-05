@@ -224,7 +224,7 @@ app.get('/items/:category', (req, res) => {
 
 // Fetch all items from the items table
 app.get('/items', (req, res) => {
-  const query = 'SELECT * FROM items WHERE IsInactive = 0';
+  const query = 'SELECT * FROM items';
   db.query(query, (err, results) => {
     if (err) {
       console.error('Error fetching items:', err);
