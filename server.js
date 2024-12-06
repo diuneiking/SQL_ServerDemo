@@ -63,6 +63,33 @@ app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
 
+// Route: Process sale and update inventory
+app.post('/process-sale', (req, res) => {
+  const { salesId, itemCode, quantity } = req.body;
+
+  if (!salesId || !itemCode || !quantity || typeof salesId !== 'number' || typeof itemCode !== 'number' || typeof quantity !== 'number') {
+    return res.status(400).send({ success: false, message: 'Invalid input. Ensure salesId, itemCode, and quantity are provided as numbers.' });
+  }
+
+  const query = 'CALL ProcessSaleItem(?, ?, ?, @errorMessage); SELECT @errorMessage AS errorMessage;';
+
+  db.query(query, [salesId, itemCode, quantity], (err, results) => {
+    if (err) {
+      console.error('Error processing sale:', err);
+      return res.status(500).send({ success: false, message: 'Error processing sale.' });
+    }
+
+    const errorMessage = results[1][0].errorMessage;
+
+    if (errorMessage) {
+      return res.status(400).send({ success: false, message: errorMessage });
+    }
+
+    res.status(200).send({ success: true, message: 'Sale processed successfully.' });
+    broadcastUpdate({ type: 'inventory-update', itemCode, quantity });
+  });
+});
+
 // Fetch glass status
 app.get('/glass-status', (req, res) => {
   const query = 'SELECT called FROM glass_pickup_status WHERE id = 1';
