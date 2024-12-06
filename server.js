@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
 //   connectionLimit: 10,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -63,17 +63,22 @@ app.get('/', (req, res) => {
   res.send({ message: 'Server is running' });
 });
 
-// Route: Process sale and update inventory
 app.post('/process-sale', (req, res) => {
-  const { salesId, itemCode, quantity } = req.body;
+  const { itemCode, quantity } = req.body;
 
-  if (!salesId || !itemCode || !quantity || typeof salesId !== 'number' || typeof itemCode !== 'number' || typeof quantity !== 'number') {
-    return res.status(400).send({ success: false, message: 'Invalid input. Ensure salesId, itemCode, and quantity are provided as numbers.' });
+  // Validate input types
+  if (typeof itemCode !== 'number' || typeof quantity !== 'number') {
+    return res.status(400).send({
+      success: false,
+      message: 'Invalid input. itemCode and quantity must be numbers.',
+    });
   }
 
-  const query = 'CALL ProcessSaleItem(?, ?, ?, @errorMessage); SELECT @errorMessage AS errorMessage;';
+  // Call the procedure
+  const query =
+    'CALL ProcessSaleItem(?, ?, @errorMessage); SELECT @errorMessage AS errorMessage;';
 
-  db.query(query, [salesId, itemCode, quantity], (err, results) => {
+  db.query(query, [itemCode, quantity], (err, results) => {
     if (err) {
       console.error('Error processing sale:', err);
       return res.status(500).send({ success: false, message: 'Error processing sale.' });
@@ -89,6 +94,7 @@ app.post('/process-sale', (req, res) => {
     broadcastUpdate({ type: 'inventory-update', itemCode, quantity });
   });
 });
+
 
 // Fetch glass status
 app.get('/glass-status', (req, res) => {
@@ -651,7 +657,7 @@ app.post('/insert_sales_data', (req, res) => {
     discountName,
     discountType,
     tenderedCash,
-    changes
+    changes,
   } = req.body;
 
   if (!userName) {
@@ -665,17 +671,6 @@ app.post('/insert_sales_data', (req, res) => {
   }
 
   const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
-  console.log('Received Order Items:', orderItems);
-
-  const insertSalesQuery = `
-    INSERT INTO sales (
-      OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
-      ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
-      discountName, discountType, TenderedCash, Changes
-    ) 
-    VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-
   const totalItemPrice = orderItems.reduce((sum, item) => sum + item.Price * item.Quantity, 0);
   const finalPrice = totalItemPrice - discount + calculatedServiceCharge + rounding;
 
@@ -692,6 +687,15 @@ app.post('/insert_sales_data', (req, res) => {
         return res.status(500).send('Failed to begin transaction');
       }
 
+      const insertSalesQuery = `
+        INSERT INTO sales (
+          OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
+          ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
+          discountName, discountType, TenderedCash, Changes
+        ) 
+        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
       connection.query(insertSalesQuery, [
         orderId,
         totalItemPrice,
@@ -707,7 +711,7 @@ app.post('/insert_sales_data', (req, res) => {
         discountName,
         discountType,
         tenderedCash,
-        changes
+        changes,
       ], (err, result) => {
         if (err) {
           console.error('Failed to insert into sales:', err);
@@ -720,32 +724,47 @@ app.post('/insert_sales_data', (req, res) => {
         const salesId = result.insertId;
 
         const insertSalesItemsPromises = orderItems.map((item) => {
-          const insertSalesItemsQuery = `
-            INSERT INTO sales_items (
-              SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
-            ) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `;
-
           return new Promise((resolve, reject) => {
-            connection.query(insertSalesItemsQuery, [
-              salesId,
-              item.ItemCode,
-              item.ItemName,
-              item.Quantity,
-              item.Price,
-              orderId,
-              item.Remark || '',
-              item.ModifierCode || '',
-              JSON.stringify(item.SelectedAddOns || []),
-              isTakeAway ? 1 : 0
-            ], (err, result) => {
-              if (err) {
-                console.error('Failed to insert into sales_items:', err);
-                reject(err);
-              } else {
-                resolve(result);
+            // Deduct inventory
+            const deductInventoryQuery = `
+              UPDATE items
+              SET Inventory = Inventory - ?
+              WHERE ItemCode = ? AND Inventory IS NOT NULL AND Inventory >= ?
+            `;
+
+            connection.query(deductInventoryQuery, [item.Quantity, item.ItemCode, item.Quantity], (err, results) => {
+              if (err || results.affectedRows === 0) {
+                const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
+                console.error(errorMsg, err);
+                return reject(new Error(errorMsg));
               }
+
+              // Insert into sales_items
+              const insertSalesItemsQuery = `
+                INSERT INTO sales_items (
+                  SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
+                ) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `;
+
+              connection.query(insertSalesItemsQuery, [
+                salesId,
+                item.ItemCode,
+                item.ItemName,
+                item.Quantity,
+                item.Price,
+                orderId,
+                item.Remark || '',
+                item.ModifierCode || '',
+                JSON.stringify(item.SelectedAddOns || []),
+                isTakeAway ? 1 : 0,
+              ], (err, result) => {
+                if (err) {
+                  console.error(`Failed to insert into sales_items for ItemCode ${item.ItemCode}:`, err);
+                  return reject(err);
+                }
+                resolve(result);
+              });
             });
           });
         });
@@ -761,12 +780,10 @@ app.post('/insert_sales_data', (req, res) => {
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
             `;
 
-            const orderItemsJson = JSON.stringify(
-              orderItems.map((item) => ({
-                ...item,
-                SelectedAddOns: item.SelectedAddOns || []
-              }))
-            );
+            const orderItemsJson = JSON.stringify(orderItems.map((item) => ({
+              ...item,
+              SelectedAddOns: item.SelectedAddOns || [],
+            })));
 
             connection.query(insertInvoicesQuery, [
               orderId,
@@ -784,7 +801,7 @@ app.post('/insert_sales_data', (req, res) => {
               discountName,
               discountType,
               tenderedCash,
-              changes
+              changes,
             ], (err, result) => {
               if (err) {
                 console.error('Failed to insert into invoices:', err);
@@ -809,16 +826,17 @@ app.post('/insert_sales_data', (req, res) => {
             });
           })
           .catch((err) => {
-            console.error('Error processing sales items:', err);
-            return connection.rollback(() => {
+            console.error('Error processing sales items:', err.message);
+            connection.rollback(() => {
               connection.release();
-              res.status(500).send('Failed to insert sales items');
+              res.status(400).send(`Failed to insert sales items: ${err.message}`);
             });
           });
       });
     });
   });
 });
+
 
 // Insert into heehee_order table
 app.post('/heehee_orders/saveOrUpdate', (req, res) => {
@@ -1148,6 +1166,29 @@ app.delete('/unpaid_orders/:orderId', (req, res) => {
     }
   });
 });
+
+app.delete('/delete_unpaid_orders', (req, res) => {
+  const deleteQuery = `DELETE FROM unpaid_orders`;
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.query(deleteQuery, (err, result) => {
+      connection.release(); // Release the connection back to the pool
+      if (err) {
+        console.error('Failed to delete records from unpaid_orders:', err);
+        return res.status(500).send('Failed to delete unpaid orders');
+      }
+
+      console.log('All records deleted from unpaid_orders');
+      res.status(200).send('All unpaid orders have been successfully deleted');
+    });
+  });
+});
+
 
 app.post('/reverse_order', (req, res) => {
   const { orderId } = req.body;
