@@ -679,14 +679,14 @@ app.post('/insert_sales_data', (req, res) => {
       console.error('Failed to get database connection:', err);
       return res.status(500).send('Failed to connect to database');
     }
-
+  
     connection.beginTransaction((err) => {
       if (err) {
         console.error('Failed to begin transaction:', err);
         connection.release();
         return res.status(500).send('Failed to begin transaction');
       }
-
+  
       const insertSalesQuery = `
         INSERT INTO sales (
           OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
@@ -695,7 +695,7 @@ app.post('/insert_sales_data', (req, res) => {
         ) 
         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-
+  
       connection.query(insertSalesQuery, [
         orderId,
         totalItemPrice,
@@ -720,25 +720,28 @@ app.post('/insert_sales_data', (req, res) => {
             res.status(500).send('Failed to insert sales data');
           });
         }
-
-        const salesId = result.insertId;
-
+  
+        const salesId = result.insertId; // Ensure salesId is assigned here
+  
         const insertSalesItemsPromises = orderItems.map((item) => {
           return new Promise((resolve, reject) => {
-            // Deduct inventory
+            // Check inventory and deduct only if Inventory is NOT NULL
             const deductInventoryQuery = `
               UPDATE items
-              SET Inventory = Inventory - ?
-              WHERE ItemCode = ? AND Inventory IS NOT NULL AND Inventory >= ?
+              SET Inventory = CASE 
+                WHEN Inventory IS NOT NULL THEN Inventory - ?
+                ELSE Inventory
+              END
+              WHERE ItemCode = ? AND (Inventory IS NULL OR Inventory >= ?)
             `;
-
+  
             connection.query(deductInventoryQuery, [item.Quantity, item.ItemCode, item.Quantity], (err, results) => {
-              if (err || results.affectedRows === 0) {
-                const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
+              if (err || (results.affectedRows === 0 && item.Quantity > 0)) {
+                const errorMsg = `Insufficient inventory or error for ItemCode ${item.ItemCode}`;
                 console.error(errorMsg, err);
                 return reject(new Error(errorMsg));
               }
-
+  
               // Insert into sales_items
               const insertSalesItemsQuery = `
                 INSERT INTO sales_items (
@@ -746,9 +749,9 @@ app.post('/insert_sales_data', (req, res) => {
                 ) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `;
-
+  
               connection.query(insertSalesItemsQuery, [
-                salesId,
+                salesId, // Use salesId here
                 item.ItemCode,
                 item.ItemName,
                 item.Quantity,
@@ -768,7 +771,7 @@ app.post('/insert_sales_data', (req, res) => {
             });
           });
         });
-
+  
         Promise.all(insertSalesItemsPromises)
           .then(() => {
             const insertInvoicesQuery = `
@@ -779,12 +782,12 @@ app.post('/insert_sales_data', (req, res) => {
               ) 
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
             `;
-
+  
             const orderItemsJson = JSON.stringify(orderItems.map((item) => ({
               ...item,
               SelectedAddOns: item.SelectedAddOns || [],
             })));
-
+  
             connection.query(insertInvoicesQuery, [
               orderId,
               totalItemPrice,
@@ -810,7 +813,7 @@ app.post('/insert_sales_data', (req, res) => {
                   res.status(500).send('Failed to insert invoices');
                 });
               }
-
+  
               connection.commit((err) => {
                 if (err) {
                   console.error('Failed to commit transaction:', err);
@@ -819,7 +822,7 @@ app.post('/insert_sales_data', (req, res) => {
                     res.status(500).send('Failed to commit transaction');
                   });
                 }
-
+  
                 connection.release();
                 res.status(200).send('Sales data inserted successfully');
               });
@@ -835,8 +838,7 @@ app.post('/insert_sales_data', (req, res) => {
       });
     });
   });
-});
-
+  
 
 // Insert into heehee_order table
 app.post('/heehee_orders/saveOrUpdate', (req, res) => {
@@ -1020,7 +1022,7 @@ app.post('/move_order_to_done', (req, res) => {
     });
   });
 });
-
+});
 // Delete order from heehee_order
 app.post('/heehee_orders/void', (req, res) => {
   const { OrderId } = req.body;
