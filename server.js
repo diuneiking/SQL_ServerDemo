@@ -1179,10 +1179,13 @@ app.delete('/unpaid_orders/:orderId', (req, res) => {
     if (result.affectedRows > 0) {
       res.send('Unpaid order deleted successfully');
     } else {
+      // Inform that no matching order was found but continue
+      console.warn(`No unpaid order found with OrderId: ${orderId}`);
       res.status(404).send('Order not found');
     }
   });
 });
+
 
 app.delete('/delete_unpaid_orders', (req, res) => {
   const deleteQuery = `DELETE FROM unpaid_orders`;
