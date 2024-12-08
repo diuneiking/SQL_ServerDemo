@@ -28,9 +28,9 @@ const db = mysql.createPool({
 // // Database connection
 // const db = mysql.createPool({
 //   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   user: 'u461355420_hidden',
+//   password: 'Hidden@2024',
+//   database: 'u461355420_hl',
 //   waitForConnections: true,
 //   connectionLimit: 10,
 //   queueLimit: 0
@@ -917,7 +917,6 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
   );
 });
 
-// Move order from heehee_order to heehee_done
 app.post('/move_order_to_done', (req, res) => {
   const { OrderId } = req.body;
 
@@ -958,39 +957,50 @@ app.post('/move_order_to_done', (req, res) => {
         }
 
         const orderData = results[0];
+        const items = JSON.parse(orderData.Items); // Parse the Items JSON
 
-        // Insert the order into heehee_done
+        // Prepare the insert query
         const insertDoneQuery = `
           INSERT INTO heehee_done (
-            OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice,
-            Ordered, TableName, IsTakeAway, Branch
+            OrderId, OrderDate, TableName, ItemName, Quantity, TotalPrice, Addons, Remark
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        connection.query(
-          insertDoneQuery,
-          [
-            orderData.OrderId,
-            orderData.OrderDate,
-            orderData.TotalPrice,
-            orderData.Items,
-            orderData.Discount,
-            orderData.FinalPrice,
-            orderData.Ordered,
-            orderData.TableName,
-            orderData.IsTakeAway,
-            orderData.Branch,
-          ],
-          (err, result) => {
-            if (err) {
-              console.error('Failed to insert into heehee_done:', err);
-              return connection.rollback(() => {
-                connection.release();
-                res.status(500).send('Failed to move order to heehee_done');
-              });
-            }
 
-            // Delete the order from heehee_order
+        // Iterate over the items and insert each one as a row
+        let insertPromises = items.map(item => {
+          const { itemName, quantity, remark, selectedAddOns } = item;
+          const addons = selectedAddOns.map(addon => addon.addOnName).join(", "); // Join addons into a single string
+          const totalPrice = (parseFloat(item.price) + selectedAddOns.reduce((sum, addon) => sum + parseFloat(addon.addOnPrice), 0)) * quantity;
+
+          return new Promise((resolve, reject) => {
+            connection.query(
+              insertDoneQuery,
+              [
+                orderData.OrderId,
+                orderData.OrderDate,
+                orderData.TableName,
+                itemName,
+                quantity,
+                totalPrice.toFixed(2), // Ensure TotalPrice is formatted as a string with two decimal places
+                addons,
+                remark,
+              ],
+              (err, result) => {
+                if (err) {
+                  reject(`Failed to insert item ${itemName} into heehee_done: ${err}`);
+                } else {
+                  resolve(result);
+                }
+              }
+            );
+          });
+        });
+
+        // Execute all insert queries for each item
+        Promise.all(insertPromises)
+          .then(() => {
+            // Delete the order from heehee_order after successful insert
             const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
             connection.query(deleteQuery, [OrderId], (err, result) => {
               if (err) {
@@ -1018,12 +1028,19 @@ app.post('/move_order_to_done', (req, res) => {
                 });
               });
             });
-          }
-        );
+          })
+          .catch(err => {
+            console.error(err);
+            connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to move order to heehee_done');
+            });
+          });
       });
     });
   });
 });
+
 
 // Delete order from heehee_order
 app.post('/heehee_orders/void', (req, res) => {
