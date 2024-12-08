@@ -1117,15 +1117,11 @@ app.post('/heehee_orders/void', (req, res) => {
 
 
 app.post('/heehee_orders/delete', (req, res) => {
-  const { TableName } = req.body;
+  const { OrderId } = req.body;
 
-  if (!TableName) {
-    return res.status(400).send('TableName is required');
-  }
+  const query = `DELETE FROM heehee_order WHERE OrderId = ?`;
 
-  const query = `DELETE FROM heehee_order WHERE TableName = ?`;
-
-  db.query(query, [TableName], (err, result) => {
+  db.query(query, [OrderId], (err, result) => {
     if (err) {
       console.error('Failed to delete Heehee order:', err);
       return res.status(500).send('Failed to delete Heehee order');
