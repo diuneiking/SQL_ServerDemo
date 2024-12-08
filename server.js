@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-// const db = mysql.createPool({
-//   host: process.env.DB_HOST,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME,
-//   waitForConnections: true,
-//   connectionLimit: 10,
-//   queueLimit: 0
-// });
-
-// // Database connection
 const db = mysql.createPool({
-  host: 'srv1627.hstgr.io',
-  user: 'u461355420_superadmin',
-  password: 'Heehee@2024',
-  database: 'u461355420_heehee',
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
+
+// // Database connection
+// const db = mysql.createPool({
+//   host: 'srv1627.hstgr.io',
+//   user: 'u461355420_superadmin',
+//   password: 'Heehee@2024',
+//   database: 'u461355420_heehee',
+//   waitForConnections: true,
+//   connectionLimit: 10,
+//   queueLimit: 0
+// });
 
 
 // Logging middleware for debugging
@@ -1222,8 +1222,14 @@ app.post('/reverse_order', (req, res) => {
       price: item.Price,
       quantity: item.Quantity,
       remark: item.Remark,
-      selectedAddOns: item.SelectedAddOns || [],
+      selectedAddOns: item.SelectedAddOns.map(addOn => ({
+        addOnID: addOn.AddOnID,        // Add the AddOnID for consistency
+        addOnName: addOn.AddOnName,
+        addOnPrice: addOn.AddOnPrice,
+        modifierCode: addOn.ModifierCode || '',  // Default to empty string if ModifierCode is missing
+      })) || [],
     }));
+    
 
 
     // Calculate the TotalPrice and FinalPrice without discounts and service charges
@@ -1262,28 +1268,26 @@ app.post('/reverse_order', (req, res) => {
             return res.status(500).send('Failed to delete from invoices');
           }
 
-          // After deletion, insert the order details back into unpaid_orders
-          const insertUnpaidOrderQuery = `
+            const insertUnpaidOrderQuery = `
             INSERT INTO unpaid_orders (OrderID, OrderDate, TotalPrice, Items, Discount, FinalPrice, TableName, IsTakeAway)
             VALUES (?, NOW(), ?, ?, ?, ?, ?, ?)
           `;
-
+          
           const insertValues = [
             invoice.OrderID,
             totalPrice, // Use calculated totalPrice
-            JSON.stringify(itemsDetails), // Insert normalized itemsDetails
+            JSON.stringify(itemsDetails), // Insert the normalized itemsDetails with full add-ons
             invoice.Discount || 0, // Default to 0 if Discount is null
             finalPrice, // Use the same calculated value as FinalPrice
             invoice.TableName || '-',
             invoice.IsTakeAway || 0, // Default to 0 if IsTakeAway is null
           ];
-
-
+          
           db.query(insertUnpaidOrderQuery, insertValues, (err, result) => {
             if (err) {
               return res.status(500).send('Failed to insert back into unpaid_orders');
             }
-
+          
             res.status(200).send('Order reversed and reinserted into unpaid orders successfully');
           });
         });
