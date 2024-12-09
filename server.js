@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 50,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_hidden',
-//   password: 'Hidden@2024',
-//   database: 'u461355420_hl',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
-//   connectionLimit: 10,
+//   connectionLimit: 50,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -267,6 +267,27 @@ app.get('/items', (req, res) => {
     }
   });
 });
+
+// Update Portion of an item using ItemCode
+app.put('/items/:itemCode', (req, res) => {
+  const itemCode = req.params.itemCode; // Get the ItemCode from the URL
+  const { Portion } = req.body; // Get the new Portion value from the request body
+
+  if (typeof Portion === 'undefined') {
+    return res.status(400).json({ error: 'Portion value is required' });
+  }
+
+  const query = 'UPDATE items SET `Portion` = ? WHERE `ItemCode` = ?';
+  db.query(query, [Portion, itemCode], (err, result) => {
+    if (err) {
+      console.error('Error updating portion:', err);
+      return res.status(500).json({ error: 'Failed to update portion' });
+    }
+  
+    res.json({ message: 'Portion updated successfully' });
+  });
+});
+
 
 app.get('/modifiers_and_add_ons', (req, res) => {
   const { itemCode } = req.query;
@@ -792,40 +813,58 @@ app.post('/insert_sales_data', (req, res) => {
             END
             WHERE ItemCode = ?
           `;
-          
 
-            connection.query(deductInventoryQuery, [item.Quantity, item.ItemCode, item.Quantity], (err, results) => {
+            // Deduct portion
+            const deductPortionQuery = `
+            UPDATE items
+            SET \`Portion\` = CASE
+              WHEN \`Portion\` IS NOT NULL AND \`Portion\` >= ? THEN \`Portion\` - ?
+              ELSE \`Portion\`
+            END
+            WHERE \`ItemCode\` = ?
+            `;
+
+            connection.query(deductInventoryQuery, [item.Quantity, item.Quantity, item.ItemCode], (err, results) => {
               if (err || results.affectedRows === 0) {
                 const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
                 console.error(errorMsg, err);
                 return reject(new Error(errorMsg));
               }
 
-              // Insert into sales_items
-              const insertSalesItemsQuery = `
-                INSERT INTO sales_items (
-                  SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
-                ) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              `;
-
-              connection.query(insertSalesItemsQuery, [
-                salesId,
-                item.ItemCode,
-                item.ItemName,
-                item.Quantity,
-                item.Price,
-                orderId,
-                item.Remark || '',
-                item.ModifierCode || '',
-                JSON.stringify(item.SelectedAddOns || []),
-                isTakeAway ? 1 : 0,
-              ], (err, result) => {
-                if (err) {
-                  console.error(`Failed to insert into sales_items for ItemCode ${item.ItemCode}:`, err);
-                  return reject(err);
+              // Deduct portion
+              connection.query(deductPortionQuery, [item.Quantity, item.Quantity, item.ItemCode], (err, results) => {
+                if (err || results.affectedRows === 0) {
+                  const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode}`;
+                  console.error(errorMsg, err);
+                  return reject(new Error(errorMsg));
                 }
-                resolve(result);
+
+                // Insert into sales_items
+                const insertSalesItemsQuery = `
+                  INSERT INTO sales_items (
+                    SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
+                  ) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `;
+
+                connection.query(insertSalesItemsQuery, [
+                  salesId,
+                  item.ItemCode,
+                  item.ItemName,
+                  item.Quantity,
+                  item.Price,
+                  orderId,
+                  item.Remark || '',
+                  item.ModifierCode || '',
+                  JSON.stringify(item.SelectedAddOns || []),
+                  isTakeAway ? 1 : 0,
+                ], (err, result) => {
+                  if (err) {
+                    console.error(`Failed to insert into sales_items for ItemCode ${item.ItemCode}:`, err);
+                    return reject(err);
+                  }
+                  resolve(result);
+                });
               });
             });
           });
@@ -898,6 +937,7 @@ app.post('/insert_sales_data', (req, res) => {
     });
   });
 });
+
 
 
 // Insert into heehee_order table
