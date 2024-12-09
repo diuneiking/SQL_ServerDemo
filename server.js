@@ -268,6 +268,64 @@ app.get('/items', (req, res) => {
   });
 });
 
+app.get('/modifiers_and_add_ons', (req, res) => {
+  const { itemCode } = req.query;
+
+  if (!itemCode) {
+    return res.status(400).send({ success: false, message: 'itemCode is required' });
+  }
+
+  const query = `
+    SELECT ModifierCode
+    FROM items
+    WHERE Branch = ? AND ItemCode = ?;
+  `;
+
+  db.query(query, ['Heehee', itemCode], (err, results) => {
+    if (err) {
+      console.error('Database query error:', err);
+      return res.status(500).send({ success: false, message: 'Database query error' });
+    }
+
+    if (results.length > 0 && results[0].ModifierCode) {
+      const modifierCodes = results[0].ModifierCode.split(','); // Split ModifierCode into an array
+
+      // Query to fetch all modifiers and their add-ons
+      const placeholders = modifierCodes.map(() => '?').join(',');
+      const modifiersQuery = `
+        SELECT * FROM modifiers WHERE ModifierCode IN (${placeholders});
+      `;
+      const addOnsQuery = `
+        SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders}) AND Branch = ?;
+      `;
+
+      db.query(modifiersQuery, [...modifierCodes], (modErr, modifiers) => {
+        if (modErr) {
+          console.error('Database query error:', modErr);
+          return res.status(500).send({ success: false, message: 'Database query error' });
+        }
+
+        db.query(addOnsQuery, [...modifierCodes, 'Heehee'], (addOnErr, addOns) => {
+          if (addOnErr) {
+            console.error('Database query error:', addOnErr);
+            return res.status(500).send({ success: false, message: 'Database query error' });
+          }
+
+          res.send({
+            modifiers: modifiers || [],
+            addOns: addOns || [],
+          });
+        });
+      });
+    } else {
+      res.send({
+        modifiers: [],
+        addOns: [],
+      });
+    }
+  });
+});
+
 
 // Fetch modifiers
 app.get('/modifiers', (req, res) => {
@@ -854,6 +912,7 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
     Ordered,
     TableName,
     IsTakeAway,
+    CompletedBy, // Include CompletedBy in the request body
   } = req.body;
 
   // Set Branch as "Heehee" by default
@@ -876,9 +935,10 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
       Ordered,
       TableName,
       IsTakeAway,
-      Branch
+      Branch,
+      CompletedBy
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       OrderDate = VALUES(OrderDate),
       TotalPrice = VALUES(TotalPrice),
@@ -888,9 +948,10 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
       Ordered = VALUES(Ordered),
       TableName = VALUES(TableName),
       IsTakeAway = VALUES(IsTakeAway),
-      Branch = VALUES(Branch)
+      Branch = VALUES(Branch),
+      CompletedBy = VALUES(CompletedBy)
   `;
-  
+
   // Execute the query
   db.query(
     query,
@@ -905,6 +966,7 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
       TableName || null,
       IsTakeAway ? 1 : 0,
       Branch, // Always insert as "Heehee"
+      CompletedBy || null, // Save CompletedBy or null if not provided
     ],
     (err, result) => {
       if (err) {
@@ -958,13 +1020,14 @@ app.post('/move_order_to_done', (req, res) => {
 
         const orderData = results[0];
         const items = JSON.parse(orderData.Items); // Parse the Items JSON
+        const completedBy = orderData.CompletedBy; // Ensure CompletedBy is fetched
 
         // Prepare the insert query
         const insertDoneQuery = `
           INSERT INTO heehee_done (
-            OrderId, OrderDate, TableName, ItemName, Quantity, TotalPrice, Addons, Remark
+            OrderId, OrderDate, TableName, ItemName, Quantity, TotalPrice, Addons, Remark, CompletedBy
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         // Iterate over the items and insert each one as a row
@@ -985,6 +1048,7 @@ app.post('/move_order_to_done', (req, res) => {
                 totalPrice.toFixed(2), // Ensure TotalPrice is formatted as a string with two decimal places
                 addons,
                 remark,
+                completedBy || null, // Use fetched CompletedBy or null if not available
               ],
               (err, result) => {
                 if (err) {
@@ -1040,7 +1104,6 @@ app.post('/move_order_to_done', (req, res) => {
     });
   });
 });
-
 
 // Delete order from heehee_order
 app.post('/heehee_orders/void', (req, res) => {
