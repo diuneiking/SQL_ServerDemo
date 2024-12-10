@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 50,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
-//   connectionLimit: 10,
+//   connectionLimit: 50,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -267,7 +267,6 @@ app.get('/items', (req, res) => {
     }
   });
 });
-
 
 app.get('/modifiers_and_add_ons', (req, res) => {
   const { itemCode } = req.query;
@@ -1671,7 +1670,6 @@ app.put('/items/:itemCode', (req, res) => {
   );
 });
 
-
 // Fetch company details
 app.get('/company_info', (req, res) => {
   const query = 'SELECT * FROM company_info';
@@ -2455,58 +2453,6 @@ app.get('/1items', (req, res) => {
       return acc;
     }, {});
     res.status(200).send(groupedItems);
-  });
-});
-
-app.get('/item_setup', (req, res) => {
-  const query = `
-    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch, \`Portion\`, IsInactive
-    FROM items
-    ORDER BY Category, ItemName;
-  `;
-
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error('Error executing query:', err);
-      return res.status(500).send({ success: false, message: 'Internal server error' });
-    }
-   
-    const groupedItems = results.reduce((acc, item) => {
-      if (!acc[item.Category]) {
-        acc[item.Category] = [];
-      }
-      acc[item.Category].push({
-        itemCode: item.ItemCode,
-        itemName: item.ItemName,
-        itemAlias: item.ItemAlias, // Include ItemAlias here
-        price: item.Price,
-        departmentId: item.DepartmentID,
-        branch: item.Branch, // Ensure branch is included here
-        portion: item.Portion,
-        isInactive: item.IsInactive, // Include IsInactive status
-      });
-      return acc;
-    }, {});
-    res.status(200).send(groupedItems);
-  });
-});
-
-app.put('/items/:itemCode/inactive', (req, res) => {
-  const itemCode = req.params.itemCode; // Get the ItemCode from the URL
-  const { isInactive } = req.body; // Get the new Inactive status from the request body
-
-  if (typeof isInactive === 'undefined') {
-    return res.status(400).send({ success: false, message: 'IsInactive value is required' });
-  }
-
-  const query = 'UPDATE items SET IsInactive = ? WHERE ItemCode = ?';
-  db.query(query, [isInactive, itemCode], (err, result) => {
-    if (err) {
-      console.error('Error updating IsInactive:', err);
-      return res.status(500).send({ success: false, message: 'Failed to update IsInactive status' });
-    }
-  
-    res.status(200).send({ success: true, message: 'IsInactive status updated successfully' });
   });
 });
 
