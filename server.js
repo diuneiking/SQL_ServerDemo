@@ -1070,8 +1070,31 @@ app.post('/move_order_to_done', (req, res) => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
-        // Iterate over the items and insert each one as a row
-        let insertPromises = items.map(item => {
+        let updatePortionPromises = items.map(item => {
+          return new Promise((resolve, reject) => {
+            // Deduct portion for the item
+            const deductPortionQuery = `
+              UPDATE items
+              SET \`Portion\` = CASE
+                WHEN \`Portion\` IS NOT NULL AND \`Portion\` >= ? THEN \`Portion\` - ?
+                ELSE \`Portion\`
+              END
+              WHERE \`ItemCode\` = ?
+            `;
+
+            connection.query(deductPortionQuery, [item.quantity, item.quantity, item.itemCode], (err, results) => {
+              if (err || results.affectedRows === 0) {
+                const errorMsg = `Insufficient portion for ItemCode ${item.itemCode}`;
+                console.error(errorMsg, err);
+                return reject(new Error(errorMsg));
+              }
+
+              resolve(results);
+            });
+          });
+        });
+
+        let insertDonePromises = items.map(item => {
           const { itemName, quantity, remark, selectedAddOns } = item;
           const addons = selectedAddOns.map(addon => addon.addOnName).join(", "); // Join addons into a single string
           const totalPrice = (parseFloat(item.price) + selectedAddOns.reduce((sum, addon) => sum + parseFloat(addon.addOnPrice), 0)) * quantity;
@@ -1101,8 +1124,8 @@ app.post('/move_order_to_done', (req, res) => {
           });
         });
 
-        // Execute all insert queries for each item
-        Promise.all(insertPromises)
+        // Combine all promises (portion update + insertion)
+        Promise.all([...updatePortionPromises, ...insertDonePromises])
           .then(() => {
             // Delete the order from heehee_order after successful insert
             const deleteQuery = `DELETE FROM heehee_order WHERE OrderId = ?`;
@@ -1137,13 +1160,14 @@ app.post('/move_order_to_done', (req, res) => {
             console.error(err);
             connection.rollback(() => {
               connection.release();
-              res.status(500).send('Failed to move order to heehee_done');
+              res.status(400).send(`Failed to process order: ${err.message}`);
             });
           });
       });
     });
   });
 });
+
 
 // Delete order from heehee_order
 app.post('/heehee_orders/void', (req, res) => {
@@ -2410,7 +2434,7 @@ app.post('/1login', (req, res) => {
 
 app.get('/1items', (req, res) => {
   const query = `
-    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch
+    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch, \`Portion\`
     FROM items
     WHERE IsInactive = 0 
     ORDER BY Category, ItemName;
@@ -2433,10 +2457,63 @@ app.get('/1items', (req, res) => {
         price: item.Price,
         departmentId: item.DepartmentID,
         branch: item.Branch, // Ensure branch is included here
+        portion: item.Portion,
       });
       return acc;
     }, {});
     res.status(200).send(groupedItems);
+  });
+});
+
+app.get('/item_setup', (req, res) => {
+  const query = `
+    SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch, \`Portion\`, IsInactive
+    FROM items
+    ORDER BY Category, ItemName;
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error executing query:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+   
+    const groupedItems = results.reduce((acc, item) => {
+      if (!acc[item.Category]) {
+        acc[item.Category] = [];
+      }
+      acc[item.Category].push({
+        itemCode: item.ItemCode,
+        itemName: item.ItemName,
+        itemAlias: item.ItemAlias, // Include ItemAlias here
+        price: item.Price,
+        departmentId: item.DepartmentID,
+        branch: item.Branch, // Ensure branch is included here
+        portion: item.Portion,
+        isInactive: item.IsInactive, // Include IsInactive status
+      });
+      return acc;
+    }, {});
+    res.status(200).send(groupedItems);
+  });
+});
+
+app.put('/items/:itemCode/inactive', (req, res) => {
+  const itemCode = req.params.itemCode; // Get the ItemCode from the URL
+  const { isInactive } = req.body; // Get the new Inactive status from the request body
+
+  if (typeof isInactive === 'undefined') {
+    return res.status(400).send({ success: false, message: 'IsInactive value is required' });
+  }
+
+  const query = 'UPDATE items SET IsInactive = ? WHERE ItemCode = ?';
+  db.query(query, [isInactive, itemCode], (err, result) => {
+    if (err) {
+      console.error('Error updating IsInactive:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update IsInactive status' });
+    }
+  
+    res.status(200).send({ success: true, message: 'IsInactive status updated successfully' });
   });
 });
 
