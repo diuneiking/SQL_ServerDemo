@@ -268,26 +268,6 @@ app.get('/items', (req, res) => {
   });
 });
 
-// Update Portion of an item using ItemCode
-app.put('/items/:itemCode', (req, res) => {
-  const itemCode = req.params.itemCode; // Get the ItemCode from the URL
-  const { Portion } = req.body; // Get the new Portion value from the request body
-
-  if (typeof Portion === 'undefined') {
-    return res.status(400).json({ error: 'Portion value is required' });
-  }
-
-  const query = 'UPDATE items SET `Portion` = ? WHERE `ItemCode` = ?';
-  db.query(query, [Portion, itemCode], (err, result) => {
-    if (err) {
-      console.error('Error updating portion:', err);
-      return res.status(500).json({ error: 'Failed to update portion' });
-    }
-  
-    res.json({ message: 'Portion updated successfully' });
-  });
-});
-
 
 app.get('/modifiers_and_add_ons', (req, res) => {
   const { itemCode } = req.query;
@@ -1646,12 +1626,23 @@ app.put('/items/:itemCode', (req, res) => {
     DepartmentID,
     Inventory,
     IsInactive,
-    ModifierCode
+    ModifierCode,
+    Portion // Include Portion in the destructured request body
   } = req.body;
 
   const query = `
     UPDATE items
-    SET ItemName = ?, Price = ?, Category = ?, SKU = ?, DepartmentName = ?, DepartmentID = ?, Inventory = ?, IsInactive = ?, ModifierCode = ?
+    SET 
+      ItemName = ?, 
+      Price = ?, 
+      Category = ?, 
+      SKU = ?, 
+      DepartmentName = ?, 
+      DepartmentID = ?, 
+      Inventory = ?, 
+      IsInactive = ?, 
+      ModifierCode = ?, 
+      \`Portion\` = ? -- Add Portion to the update query
     WHERE ItemCode = ?
   `;
   
@@ -1667,6 +1658,7 @@ app.put('/items/:itemCode', (req, res) => {
       Inventory || null,
       IsInactive,
       ModifierCode || null,
+      Portion || null, // Add Portion to the parameter list
       itemCode
     ],
     (err, results) => {
@@ -1678,6 +1670,7 @@ app.put('/items/:itemCode', (req, res) => {
     }
   );
 });
+
 
 // Fetch company details
 app.get('/company_info', (req, res) => {
