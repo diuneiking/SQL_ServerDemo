@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-// const db = mysql.createPool({
-//   host: process.env.DB_HOST,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME,
-//   waitForConnections: true,
-//   connectionLimit: 50,
-//   queueLimit: 0
-// });
-
-// // Database connection
 const db = mysql.createPool({
-  host: 'srv1627.hstgr.io',
-  user: 'u461355420_superadmin',
-  password: 'Heehee@2024',
-  database: 'u461355420_heehee',
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 50,
   queueLimit: 0
 });
+
+// // Database connection
+// const db = mysql.createPool({
+//   host: 'srv1627.hstgr.io',
+//   user: 'u461355420_superadmin',
+//   password: 'Heehee@2024',
+//   database: 'u461355420_heehee',
+//   waitForConnections: true,
+//   connectionLimit: 10,
+//   queueLimit: 0
+// });
 
 
 // Logging middleware for debugging
@@ -1669,6 +1669,32 @@ app.put('/items/:itemCode', (req, res) => {
     }
   );
 });
+
+// Update only the portion of an item
+app.put('/itemsportion/:itemCode', (req, res) => {
+  const itemCode = req.params.itemCode;
+  const { Portion } = req.body; // Only accept the Portion field
+
+  const query = `
+    UPDATE items
+    SET 
+      \`Portion\` = ? -- Update only the Portion column
+    WHERE ItemCode = ?
+  `;
+
+  db.query(
+    query,
+    [Portion, itemCode],
+    (err, results) => {
+      if (err) {
+        console.error('Failed to update item portion:', err);
+        return res.status(500).send({ success: false, message: 'Failed to update item portion' });
+      }
+      res.send({ success: true });
+    }
+  );
+});
+
 
 // Fetch company details
 app.get('/company_info', (req, res) => {
