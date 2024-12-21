@@ -268,6 +268,270 @@ app.get('/items', (req, res) => {
   });
 });
 
+
+// Create a new combo set
+app.post('/combo-sets', (req, res) => {
+  const { comboSetName, comboPrice, requiredItems, assignedItems, category, isInactive } = req.body;
+
+  // Input validation
+  if (
+    !comboSetName ||
+    !comboPrice ||
+    !requiredItems ||
+    !category ||
+    !Array.isArray(assignedItems) ||
+    assignedItems.length < requiredItems ||
+    (isInactive !== 0 && isInactive !== 1) // Ensure isInactive is a boolean
+  ) {
+    return res.status(400).send({
+      success: false,
+      message: 'Invalid input or insufficient assigned items',
+    });
+  }
+
+
+  // Insert the combo set into the table
+  const query = `
+    INSERT INTO combo_sets (ComboSetName, ComboPrice, RequiredItems, AssignedItems, Category, IsInactive)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(
+    query,
+    [
+      comboSetName,
+      comboPrice,
+      requiredItems,
+      JSON.stringify(assignedItems), // Convert assignedItems to JSON
+      category,
+      isInactive, // Insert 0 or 1 for isInactive
+    ],
+    (err) => {
+      if (err) {
+        console.error('Error creating combo set:', err);
+        return res.status(500).send({
+          success: false,
+          message: 'Database error',
+        });
+      }
+      res.status(201).send({
+        success: true,
+        message: 'Combo set created successfully',
+      });
+    }
+  );
+});
+
+
+
+app.get('/combo-sets', (req, res) => {
+  const query = `
+    SELECT 
+      c.ComboSetID, 
+      c.ComboSetName, 
+      c.ComboPrice AS MainPrice, 
+      c.RequiredItems, 
+      c.AssignedItems,
+      c.Category,
+      c.isInactive -- Include the isInactive field
+    FROM combo_sets c;
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching combo sets:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    try {
+      // Process the results into a structured format
+      const comboSets = results.map((row) => {
+        // Parse AssignedItems JSON from the database
+        let assignedItems = [];
+        try {
+          assignedItems = JSON.parse(row.AssignedItems || '[]');
+        } catch (parseErr) {
+          console.error('Error parsing AssignedItems:', parseErr);
+        }
+
+        return {
+          comboSetID: row.ComboSetID,
+          comboSetName: row.ComboSetName,
+          comboPrice: row.MainPrice,
+          requiredItems: row.RequiredItems,
+          category: row.Category, // Include the category field
+          isInactive: row.isInactive, // Include isInactive in the response
+          assignedItems: assignedItems.map((item) => ({
+            itemCode: item.itemCode,
+            itemName: item.itemName,
+            part: item.part, // Ensure the part field is included
+          })),
+        };
+      });
+
+      // Send the structured combo sets
+      res.status(200).send(comboSets);
+    } catch (processErr) {
+      console.error('Error processing combo sets:', processErr);
+      res.status(500).send({ success: false, message: 'Error processing combo sets' });
+    }
+  });
+});
+
+
+app.get('/combo-set-homepage', (req, res) => {
+  const query = `
+    SELECT 
+      c.ComboSetID, 
+      c.ComboSetName, 
+      c.ComboPrice AS MainPrice, 
+      c.RequiredItems, 
+      c.AssignedItems,
+      c.Category, -- Include the Category field
+      i.ItemCode, 
+      i.ItemName
+    FROM combo_sets c
+    LEFT JOIN items i 
+      ON JSON_CONTAINS(c.AssignedItems, JSON_OBJECT('ItemCode', i.ItemCode), '$')
+    WHERE c.IsInactive = 0;
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching combo sets:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    try {
+      // Process the results into a structured format
+      const comboSets = results.map((row) => {
+        // Parse AssignedItems JSON from the database
+        let assignedItems = [];
+        try {
+          assignedItems = JSON.parse(row.AssignedItems || '[]');
+        } catch (parseErr) {
+          console.error('Error parsing AssignedItems:', parseErr);
+        }
+
+        return {
+          comboSetID: row.ComboSetID,
+          comboSetName: row.ComboSetName,
+          comboPrice: row.MainPrice,
+          requiredItems: row.RequiredItems,
+          category: row.Category, // Include the category field
+          isInactive: row.isInactive, // Include isInactive in the response
+          assignedItems: assignedItems.map((item) => ({
+            itemCode: item.itemCode,
+            itemName: item.itemName,
+            part: item.part, // Ensure the part field is included
+          })),
+        };
+      });
+
+      // Send the structured combo sets
+      res.status(200).send(comboSets);
+    } catch (processErr) {
+      console.error('Error processing combo sets:', processErr);
+      res.status(500).send({ success: false, message: 'Error processing combo sets' });
+    }
+  });
+});
+
+
+app.put('/combo-sets/:comboSetID', async (req, res) => {
+  const { comboSetID } = req.params;
+  const { comboSetName, comboPrice, requiredItems, assignedItems, category, isInactive } = req.body;
+
+  // Input validation
+  if (
+    !comboSetName ||
+    !comboPrice ||
+    !requiredItems ||
+    !category ||
+    !Array.isArray(assignedItems) ||
+    (isInactive !== 0 && isInactive !== 1) // Ensure isInactive is either 0 or 1
+  ) {
+    return res.status(400).send({ success: false, message: 'Invalid input' });
+  }
+
+  try {
+    // Update the `combo_sets` table
+    const updateQuery = `
+      UPDATE combo_sets
+      SET ComboSetName = ?, ComboPrice = ?, RequiredItems = ?, AssignedItems = ?, Category = ?, IsInactive = ?, UpdatedAt = NOW()
+      WHERE ComboSetID = ?
+    `;
+
+    const assignedItemsJson = JSON.stringify(assignedItems); // Convert to JSON
+    await new Promise((resolve, reject) => {
+      db.query(
+        updateQuery,
+        [
+          comboSetName,
+          comboPrice,
+          requiredItems,
+          assignedItemsJson,
+          category,
+          isInactive, // Pass as 0 or 1
+          comboSetID,
+        ],
+        (err, result) => {
+          if (err) return reject(err);
+          resolve(result);
+        }
+      );
+    });
+
+    res.status(200).send({
+      success: true,
+      message: 'Combo set updated successfully',
+    });
+  } catch (err) {
+    console.error('Error updating combo set:', err);
+    res.status(500).send({ success: false, message: 'Database error' });
+  }
+});
+
+
+// Delete a combo set by ID
+app.delete('/combo-sets/:id', (req, res) => {
+  const comboSetID = req.params.id;
+
+  if (!comboSetID) {
+    return res
+      .status(400)
+      .send({ success: false, message: 'Combo Set ID is required' });
+  }
+
+  const deleteQuery = `
+    DELETE FROM combo_sets
+    WHERE ComboSetID = ?
+  `;
+
+  db.query(deleteQuery, [comboSetID], (err, result) => {
+    if (err) {
+      console.error('Error deleting combo set:', err);
+      return res.status(500).send({
+        success: false,
+        message: 'Failed to delete combo set due to a database error',
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).send({
+        success: false,
+        message: 'Combo Set not found',
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: 'Combo Set deleted successfully',
+    });
+  });
+});
+
+
 app.get('/modifiers_and_add_ons', (req, res) => {
   const { itemCode } = req.query;
 
@@ -2314,6 +2578,30 @@ app.get('/checkUnfinishedDay', (req, res) => {
   });
 });
 
+// Endpoint to check if today is finished
+app.get('/checkDayFinished', (req, res) => {
+  const query = `
+    SELECT *
+    FROM end_day
+    WHERE DATE(EndTime) = CURDATE()
+      AND IsClosed = 1
+  `;
+
+  db.query(query, (error, results) => {
+    if (error) {
+      console.error('Error checking for finished day:', error);
+      res.status(500).json({ error: 'Database query failed' });
+      return;
+    }
+
+    // If there's a result, it means the day is finished
+    const isDayFinished = results.length > 0;
+
+    res.json({ isDayFinished });
+  });
+});
+
+
 // Fetch total payouts with ShiftEnded = 1 and IsEndOfDay = 0
 app.get('/payouts/totals', (req, res) => {
   const query = `
@@ -2342,11 +2630,11 @@ app.post('/end_day', (req, res) => {
     paymentDetails,
     dayID // Added DayID to the request body
   } = req.body;
-  
+
   const query = `
   UPDATE end_day
   SET 
-    EndTime = NOW(), 
+    EndTime = CONVERT_TZ(NOW(), '+00:00', '+08:00'), 
     CashCollection = ?, 
     TotalSales = ?, 
     TotalPayouts = ?, 
@@ -2357,7 +2645,7 @@ app.post('/end_day', (req, res) => {
     IsClosed = 1
   WHERE DayID = ?; -- Use DayID to target the correct row
   `;
-  
+
   db.query(query, [
     cashCollection, 
     totalSales, 
@@ -2375,6 +2663,7 @@ app.post('/end_day', (req, res) => {
     }
   });
 });
+
 
 app.get('/current_day_id', (req, res) => {
   const query = `SELECT DayID FROM end_day WHERE EndTime IS NULL LIMIT 1`;
