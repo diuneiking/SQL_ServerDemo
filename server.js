@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 50,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
-//   connectionLimit: 10,
+//   connectionLimit: 50,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -645,49 +645,56 @@ app.get('/discounts', (req, res) => {
   });
 });
 
-// Save or update order with isTakeAway
+// Save or update order with isTakeAway and billDiscount
 app.post('/save_order', (req, res) => {
-  const { orderId, orderDate, totalPrice, items, discount, finalPrice, tableName, isTakeAway } = req.body;
+  const { orderId, orderDate, totalPrice, items, itemDiscount, billDiscount, serviceCharge, finalPrice, tableName, isTakeAway } = req.body;
+
+  // Log the incoming request for debugging
+  console.log('Incoming request:', req.body);
 
   // Check if the order already exists
   const checkQuery = 'SELECT * FROM unpaid_orders WHERE OrderId = ?';
   db.query(checkQuery, [orderId], (err, results) => {
     if (err) {
-      res.status(500).send({ success: false, message: 'Database query error' });
+      console.error('SQL Error (Check Query):', err.message); // Log the error
+      res.status(500).send({ success: false, message: 'Database query error', error: err.message });
       return;
     }
+
+    const itemsJSON = JSON.stringify(items); // Serialize items to JSON for database storage
 
     if (results.length > 0) {
       // Update existing order
       const updateQuery = `
         UPDATE unpaid_orders 
-        SET OrderDate = ?, TotalPrice = ?, Items = ?, Discount = ?, FinalPrice = ?, TableName = ?, IsTakeAway = ?
+        SET OrderDate = ?, TotalPrice = ?, Items = ?, Discount = ?, FinalPrice = ?, TableName = ?, IsTakeAway = ?, BillDiscount = ?
         WHERE OrderId = ?
       `;
-      db.query(updateQuery, [orderDate, totalPrice, JSON.stringify(items), discount, finalPrice, tableName, isTakeAway ? 1 : 0, orderId], (err, results) => {
+      db.query(updateQuery, [orderDate, totalPrice, itemsJSON, itemDiscount, finalPrice, tableName, isTakeAway ? 1 : 0, billDiscount, orderId], (err, results) => {
         if (err) {
-          res.status(500).send({ success: false, message: 'Database query error' });
+          console.error('SQL Error (Update Query):', err.message); // Log the error
+          res.status(500).send({ success: false, message: 'Database query error', error: err.message });
           return;
         }
-        res.send({ success: true });
+        res.send({ success: true, message: 'Order updated successfully' });
       });
     } else {
       // Insert new order
       const insertQuery = `
-        INSERT INTO unpaid_orders (OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice, TableName, IsTakeAway)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO unpaid_orders (OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice, TableName, IsTakeAway, BillDiscount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-      db.query(insertQuery, [orderId, orderDate, totalPrice, JSON.stringify(items), discount, finalPrice, tableName, isTakeAway ? 1 : 0], (err, results) => {
+      db.query(insertQuery, [orderId, orderDate, totalPrice, itemsJSON, itemDiscount, finalPrice, tableName, isTakeAway ? 1 : 0, billDiscount], (err, results) => {
         if (err) {
-          res.status(500).send({ success: false, message: 'Database query error' });
+          console.error('SQL Error (Insert Query):', err.message); // Log the error
+          res.status(500).send({ success: false, message: 'Database query error', error: err.message });
           return;
         }
-        res.send({ success: true });
+        res.send({ success: true, message: 'Order saved successfully' });
       });
     }
   });
 });
-
 
 // Fetch all orders
 app.get('/orders', (req, res) => {
@@ -1824,13 +1831,16 @@ app.post('/items', (req, res) => {
     DepartmentID,
     Inventory,
     IsInactive,
-    ModifierCode
+    ModifierCode,
+    AutoMod // Include AutoMod in the request body
   } = req.body;
+
+  const defaultBranch = 'Heehee'; // Default value for Branch
 
   const query = `
     INSERT INTO items 
-    (ItemCode, ItemName, Price, Category, SKU, DepartmentName, DepartmentID, Inventory, IsInactive, ModifierCode) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (ItemCode, ItemName, Price, Category, SKU, DepartmentName, DepartmentID, Inventory, IsInactive, ModifierCode, AutoMod, Branch) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.query(
@@ -1840,12 +1850,14 @@ app.post('/items', (req, res) => {
       ItemName,
       Price,
       Category,
-      SKU || null,  // Use null if SKU is not provided
+      SKU || null,        // Use null if SKU is not provided
       DepartmentName,
       DepartmentID,
       Inventory || null,  // Use null if Inventory is not provided
       IsInactive,
-      ModifierCode || null // Use null if ModifierCode is not provided
+      ModifierCode || null, // Use null if ModifierCode is not provided
+      AutoMod || 0,        // Default AutoMod to 0 if not provided
+      defaultBranch       // Use the default branch "Heehee"
     ],
     (err, results) => {
       if (err) {
@@ -1856,6 +1868,7 @@ app.post('/items', (req, res) => {
     }
   );
 });
+
 
 // Fetch an item by ItemCode
 app.get('/items/:itemCode', (req, res) => {
@@ -1890,7 +1903,8 @@ app.put('/items/:itemCode', (req, res) => {
     Inventory,
     IsInactive,
     ModifierCode,
-    Portion // Include Portion in the destructured request body
+    Portion, // Include Portion in the destructured request body
+    AutoMod   // Include AutoMod in the destructured request body
   } = req.body;
 
   const query = `
@@ -1905,7 +1919,8 @@ app.put('/items/:itemCode', (req, res) => {
       Inventory = ?, 
       IsInactive = ?, 
       ModifierCode = ?, 
-      \`Portion\` = ? -- Add Portion to the update query
+      \`Portion\` = ?, -- Add Portion to the update query
+      AutoMod = ?     -- Add AutoMod to the update query
     WHERE ItemCode = ?
   `;
   
@@ -1921,7 +1936,8 @@ app.put('/items/:itemCode', (req, res) => {
       Inventory || null,
       IsInactive,
       ModifierCode || null,
-      Portion || null, // Add Portion to the parameter list
+      Portion || null,  // Add Portion to the parameter list
+      AutoMod || 0,     // Add AutoMod to the parameter list (default to 0 if null)
       itemCode
     ],
     (err, results) => {
@@ -1933,6 +1949,7 @@ app.put('/items/:itemCode', (req, res) => {
     }
   );
 });
+
 
 // Update only the portion of an item
 app.put('/itemsportion/:itemCode', (req, res) => {
@@ -3216,6 +3233,105 @@ app.put('/1updateTableName', (req, res) => {
     }
   });
 });
+
+app.post('/nye_record', (req, res) => {
+  const { terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard } = req.body;
+
+  const query = `
+    INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(
+    query,
+    [terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard],
+    (err, result) => {
+      if (err) {
+        console.error('Error executing query:', err);
+        return res.status(500).send({ success: false, message: 'Internal server error' });
+      }
+      res.status(200).send({ success: true, message: 'Record inserted or updated successfully' });
+    }
+  );
+});
+
+app.get('/nye_record', (req, res) => {
+  const { terminalid } = req.query;
+
+  // Base query to fetch all records
+  let query = "SELECT * FROM nye_record";
+  const queryParams = [];
+
+  // Add WHERE clause if terminalid is provided
+  if (terminalid) {
+    query += " WHERE terminalid = ?";
+    queryParams.push(terminalid);
+  }
+
+  // Execute the query
+  db.query(query, queryParams, (err, results) => {
+    if (err) {
+      console.error('Error fetching records:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+
+    res.status(200).send({ success: true, records: results });
+  });
+});
+
+app.delete('/nye_record/:id', (req, res) => {
+  const { id } = req.params;
+
+  // Query to delete the record by id
+  const query = "DELETE FROM nye_record WHERE id = ?";
+
+  // Execute the query
+  db.query(query, [id], (err, result) => {
+    if (err) {
+      console.error('Error deleting record:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+
+    // Check if any row was affected
+    if (result.affectedRows === 0) {
+      return res.status(404).send({ success: false, message: 'Record not found' });
+    }
+
+    res.status(200).send({ success: true, message: 'Record deleted successfully' });
+  });
+});
+
+app.get('/staff/terminal', (req, res) => {
+  const { staffName } = req.query;
+
+  const query = `SELECT TerminalID FROM staff WHERE StaffName = ?`;
+
+  db.query(query, [staffName], (err, results) => {
+    if (err) {
+      console.error('Error fetching TerminalID:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+    if (results.length === 0) {
+      return res.status(404).send({ success: false, message: 'Staff not found' });
+    }
+    res.status(200).send({ success: true, terminalId: results[0].TerminalID });
+  });
+});
+
+app.post('/staff/terminal', (req, res) => {
+  const { staffName, terminalId } = req.body;
+
+  const query = `UPDATE staff SET TerminalID = ? WHERE StaffName = ?`;
+
+  db.query(query, [terminalId, staffName], (err, result) => {
+    if (err) {
+      console.error('Error updating TerminalID:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+    res.status(200).send({ success: true, message: 'TerminalID updated successfully' });
+  });
+});
+
 
 // WebSocket connection handler
 wss.on('connection', (ws) => {
