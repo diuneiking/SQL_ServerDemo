@@ -2651,7 +2651,7 @@ app.post('/end_day', (req, res) => {
   const query = `
   UPDATE end_day
   SET 
-    EndTime = CONVERT_TZ(NOW(), '+00:00', '+08:00'), 
+    EndTime = CONCAT(DATE(StartTime), ' ', TIME(CONVERT_TZ(NOW(), '+00:00', '+08:00'))), 
     CashCollection = ?, 
     TotalSales = ?, 
     TotalPayouts = ?, 
@@ -2680,6 +2680,7 @@ app.post('/end_day', (req, res) => {
     }
   });
 });
+
 
 
 app.get('/current_day_id', (req, res) => {
