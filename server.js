@@ -3248,7 +3248,11 @@ app.put('/1updateTableName', (req, res) => {
 });
 
 app.post('/nye_record', (req, res) => {
-  const { terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard, imageName } = req.body;
+  const { terminalid, stool, matT, matH, matS, cardnumber, hiddencard, imageName } = req.body;
+
+  // Adjust the time to UTC-8
+  const currentTime = new Date();
+  const adjustedTime = new Date(currentTime.getTime() - 8 * 60 * 60 * 1000).toISOString(); // Subtract 8 hours
 
   const query = `
     INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard, imageName)
@@ -3257,13 +3261,13 @@ app.post('/nye_record', (req, res) => {
 
   db.query(
     query,
-    [terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard, imageName],
+    [terminalid, stool, matT, matH, matS, cardnumber, adjustedTime, hiddencard, imageName],
     (err, result) => {
       if (err) {
         console.error('Error executing query:', err);
         return res.status(500).send({ success: false, message: 'Internal server error' });
       }
-      res.status(200).send({ success: true, message: 'Record inserted or updated successfully' });
+      res.status(200).send({ success: true, message: 'Record inserted successfully' });
     }
   );
 });
