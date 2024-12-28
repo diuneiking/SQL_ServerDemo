@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 50,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
-//   connectionLimit: 10,
+//   connectionLimit: 50,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -1017,40 +1017,43 @@ app.post('/insert_sales_data', (req, res) => {
       }
 
       const insertSalesQuery = `
-        INSERT INTO sales (
-          OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
-          ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
-          discountName, discountType, TenderedCash, Changes
-        ) 
-        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+      INSERT INTO sales (
+        OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails, Discount, 
+        ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway, discountCode, 
+        discountName, discountType, TenderedCash, Changes, ItemDiscount, BillDiscount
+      ) 
+      VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
 
-      connection.query(insertSalesQuery, [
-        orderId,
-        totalItemPrice,
-        finalPrice,
-        JSON.stringify(paymentDetails),
-        discount,
-        calculatedServiceCharge,
-        rounding,
-        userName,
-        tableName,
-        isTakeAway ? 1 : 0,
-        discountCode,
-        discountName,
-        discountType,
-        tenderedCash,
-        changes,
-      ], (err, result) => {
-        if (err) {
-          console.error('Failed to insert into sales:', err);
-          return connection.rollback(() => {
-            connection.release();
-            res.status(500).send('Failed to insert sales data');
-          });
-        }
-
-        const salesId = result.insertId;
+    connection.query(insertSalesQuery, [
+      orderId,
+      totalItemPrice,
+      finalPrice,
+      JSON.stringify(paymentDetails),
+      discount,
+      calculatedServiceCharge,
+      rounding,
+      userName,
+      tableName,
+      isTakeAway ? 1 : 0,
+      discountCode,
+      discountName,
+      discountType,
+      tenderedCash,
+      changes,
+      calculateItemDiscount(orderItems), // Function to calculate total item discount
+      discount, // Bill-level discount (already provided in the `discount` variable)
+    ], (err, result) => {
+      if (err) {
+        console.error('Failed to insert into sales:', err);
+        return connection.rollback(() => {
+          connection.release();
+          res.status(500).send('Failed to insert sales data');
+        });
+      }
+    
+      const salesId = result.insertId;
 
         const insertSalesItemsPromises = orderItems.map((item) => {
           return new Promise((resolve, reject) => {
@@ -1123,13 +1126,20 @@ app.post('/insert_sales_data', (req, res) => {
         Promise.all(insertSalesItemsPromises)
           .then(() => {
             const insertInvoicesQuery = `
-              INSERT INTO invoices (
-                OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, 
-                ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, 
-                discountCode, discountName, discountType, TenderedCash, Changes
-              ) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
-            `;
+            INSERT INTO invoices (
+              OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding, 
+              ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway, 
+              discountCode, discountName, discountType, TenderedCash, Changes, 
+              ItemDiscount, BillDiscount
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+          
+          // Calculate item-level discount
+          const totalItemDiscount = orderItems.reduce((total, item) => {
+            const itemDiscount = item.ItemDiscount || 0; // Default to 0 if undefined
+            return total + itemDiscount * item.Quantity; // Multiply by quantity
+          }, 0);
 
             const orderItemsJson = JSON.stringify(orderItems.map((item) => ({
               ...item,
@@ -1140,7 +1150,7 @@ app.post('/insert_sales_data', (req, res) => {
               orderId,
               totalItemPrice,
               JSON.stringify(paymentDetails),
-              discount,
+              discount, // Bill discount
               serviceCharge,
               rounding,
               orderItemsJson,
@@ -1153,6 +1163,8 @@ app.post('/insert_sales_data', (req, res) => {
               discountType,
               tenderedCash,
               changes,
+              totalItemDiscount, // Total item-level discount
+              discount, // Bill-level discount
             ], (err, result) => {
               if (err) {
                 console.error('Failed to insert into invoices:', err);
@@ -1161,7 +1173,7 @@ app.post('/insert_sales_data', (req, res) => {
                   res.status(500).send('Failed to insert invoices');
                 });
               }
-
+            
               connection.commit((err) => {
                 if (err) {
                   console.error('Failed to commit transaction:', err);
@@ -1170,11 +1182,11 @@ app.post('/insert_sales_data', (req, res) => {
                     res.status(500).send('Failed to commit transaction');
                   });
                 }
-
+            
                 connection.release();
                 res.status(200).send('Sales data inserted successfully');
               });
-            });
+            });            
           })
           .catch((err) => {
             console.error('Error processing sales items:', err.message);
