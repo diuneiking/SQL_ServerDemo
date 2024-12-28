@@ -3252,7 +3252,7 @@ app.post('/nye_record', (req, res) => {
 
   // Adjust the time to UTC-8
   const currentTime = new Date();
-  const adjustedTime = new Date(currentTime.getTime() + 8 * 60 * 60 * 1000).toISOString(); // Subtract 8 hours
+  const adjustedTime = new Date(currentTime.getTime() - 8 * 60 * 60 * 1000).toISOString();
 
   const query = `
     INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard, imageName)
