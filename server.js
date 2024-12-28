@@ -1042,7 +1042,7 @@ app.post('/insert_sales_data', (req, res) => {
       discountType,
       tenderedCash,
       changes,
-      calculateItemDiscount(orderItems), // Function to calculate total item discount
+      0, // Function to calculate total item discount
       discount, // Bill-level discount (already provided in the `discount` variable)
     ], (err, result) => {
       if (err) {
@@ -3248,16 +3248,16 @@ app.put('/1updateTableName', (req, res) => {
 });
 
 app.post('/nye_record', (req, res) => {
-  const { terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard } = req.body;
+  const { terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard, imageName } = req.body;
 
   const query = `
-    INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard, imageName)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.query(
     query,
-    [terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard],
+    [terminalid, stool, matT, matH, matS, cardnumber, time, hiddencard, imageName],
     (err, result) => {
       if (err) {
         console.error('Error executing query:', err);
@@ -3267,6 +3267,7 @@ app.post('/nye_record', (req, res) => {
     }
   );
 });
+
 
 app.get('/nye_record', (req, res) => {
   const { terminalid } = req.query;
