@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-// const db = mysql.createPool({
-//   host: process.env.DB_HOST,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME,
-//   waitForConnections: true,
-//   connectionLimit: 50,
-//   queueLimit: 0
-// });
-
-// // Database connection
 const db = mysql.createPool({
-  host: 'srv1627.hstgr.io',
-  user: 'u461355420_superadmin',
-  password: 'Heehee@2024',
-  database: 'u461355420_heehee',
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 50,
   queueLimit: 0
 });
+
+// // Database connection
+// const db = mysql.createPool({
+//   host: 'srv1627.hstgr.io',
+//   user: 'u461355420_superadmin',
+//   password: 'Heehee@2024',
+//   database: 'u461355420_heehee',
+//   waitForConnections: true,
+//   connectionLimit: 10,
+//   queueLimit: 0
+// });
 
 
 // Logging middleware for debugging
@@ -3252,7 +3252,7 @@ app.post('/nye_record', (req, res) => {
 
   // Adjust the time to UTC-8
   const currentTime = new Date();
-  const adjustedTime = new Date(currentTime.getTime() + 8 * 60 * 60 * 1000).toISOString(); 
+  const adjustedTime = new Date(currentTime.getTime() + 8 * 60 * 60 * 1000).toISOString(); // Subtract 8 hours
 
   const query = `
     INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard, imageName)
