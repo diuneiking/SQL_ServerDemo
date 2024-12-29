@@ -977,6 +977,7 @@ app.post('/insert_sales_data', (req, res) => {
     totalPrice,
     paymentDetails,
     discount,
+    billDiscount,
     serviceCharge,
     rounding,
     completedBy: userName,
@@ -1001,7 +1002,8 @@ app.post('/insert_sales_data', (req, res) => {
 
   const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
   const totalItemPrice = orderItems.reduce((sum, item) => sum + item.Price * item.Quantity, 0);
-  const finalPrice = totalItemPrice - discount + calculatedServiceCharge + rounding;
+  const finalPrice = totalItemPrice - billDiscount + calculatedServiceCharge + rounding;
+
 
   db.getConnection((err, connection) => {
     if (err) {
@@ -1031,7 +1033,7 @@ app.post('/insert_sales_data', (req, res) => {
       totalItemPrice,
       finalPrice,
       JSON.stringify(paymentDetails),
-      discount,
+      billDiscount,
       calculatedServiceCharge,
       rounding,
       userName,
@@ -1091,13 +1093,15 @@ app.post('/insert_sales_data', (req, res) => {
                   console.error(errorMsg, err);
                   return reject(new Error(errorMsg));
                 }
-
+                const itemPrice = parseFloat(item.Price) || 0; // Default to 0 if item.Price is invalid
+                const itemDiscount = parseFloat(discount) || 0; // Default to 0 if discount is invalid
+                const itemFinalPrice = itemPrice - itemDiscount;
                 // Insert into sales_items
                 const insertSalesItemsQuery = `
                   INSERT INTO sales_items (
-                    SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Remark, ModifierCode, AddOns, IsTakeAway
+                    SalesId, ItemCode, ItemName, Quantity, Price, OrderID, Discount, FinalPrice, Remark, ModifierCode, AddOns, IsTakeAway, ItemDiscountValue, ItemDiscountName, ItemDiscountType
                   ) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `;
 
                 connection.query(insertSalesItemsQuery, [
@@ -1107,10 +1111,15 @@ app.post('/insert_sales_data', (req, res) => {
                   item.Quantity,
                   item.Price,
                   orderId,
+                  discount,
+                  itemFinalPrice,
                   item.Remark || '',
                   item.ModifierCode || '',
                   JSON.stringify(item.SelectedAddOns || []),
                   isTakeAway ? 1 : 0,
+                  discountCode,
+                  discountName,
+                  discountType,
                 ], (err, result) => {
                   if (err) {
                     console.error(`Failed to insert into sales_items for ItemCode ${item.ItemCode}:`, err);
@@ -1150,7 +1159,7 @@ app.post('/insert_sales_data', (req, res) => {
               orderId,
               totalItemPrice,
               JSON.stringify(paymentDetails),
-              discount, // Bill discount
+              billDiscount, // Bill discount
               serviceCharge,
               rounding,
               orderItemsJson,
@@ -3318,6 +3327,61 @@ app.delete('/nye_record/:id', (req, res) => {
   });
 });
 
+// API to fetch all orders for the receiver
+app.get('/order-receiver', (req, res) => {
+  const query = 'SELECT * FROM OrderReceiver WHERE isDone = 0';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching orders:', err);
+      return res
+        .status(500)
+        .send({ success: false, message: 'Internal server error' });
+    }
+    res.status(200).send({ success: true, data: results });
+  });
+});
+
+// API to mark an order as done
+app.patch('/order-receiver/:orderId', (req, res) => {
+  const { orderId } = req.params;
+
+  const query = `UPDATE OrderReceiver SET isDone = 1 WHERE orderId = ?`;
+  db.query(query, [orderId], (err, result) => {
+    if (err) {
+      console.error('Error marking order as done:', err);
+      return res
+        .status(500)
+        .send({ success: false, message: 'Internal server error' });
+    }
+
+    if (result.affectedRows > 0) {
+      res.status(200).send({ success: true, message: 'Order marked as done' });
+    } else {
+      res.status(404).send({ success: false, message: 'Order not found' });
+    }
+  });
+});
+
+// API to add a new order
+app.post('/order-receiver', (req, res) => {
+  const { orderId, orderDetails } = req.body;
+
+  const query = `
+    INSERT INTO OrderReceiver (orderId, orderDetails, isDone, receivedTime)
+    VALUES (?, ?, ?, NOW())
+  `;
+  db.query(query, [orderId, JSON.stringify(orderDetails), 0], (err, result) => {
+    if (err) {
+      console.error('Error inserting new order:', err);
+      return res
+        .status(500)
+        .send({ success: false, message: 'Internal server error' });
+    }
+    res.status(200).send({ success: true, message: 'Order added successfully' });
+  });
+});
+
 app.get('/staff/terminal', (req, res) => {
   const { staffName } = req.query;
 
@@ -3349,7 +3413,6 @@ app.post('/staff/terminal', (req, res) => {
   });
 });
 
-
 // WebSocket connection handler
 wss.on('connection', (ws) => {
   console.log('New WebSocket client connected');
@@ -3357,15 +3420,22 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const update = JSON.parse(message);
-      
-      if (update.action === 'table_update') {
+
+      if (update.action === 'order_done') {
+        console.log(`Order marked as done: ${update.orderId}`);
+        broadcastUpdate({
+          action: 'order_done',
+          orderId: update.orderId,
+        });
+      } else if (update.action === 'table_update') {
         console.log(`Table update received: Table ${update.id} is now ${update.status}`);
-        // Optionally handle table updates in the server
         broadcastUpdate(update); // Broadcast the update to all clients
       } else if (update.action === 'glass_status_update') {
         console.log(`Glass status update received: ${update.called === 1 ? 'Waiting for Pickup' : 'Picked Up'}`);
-        // Optionally handle glass status updates in the server
         broadcastUpdate(update); // Broadcast the update to all clients
+      } else if (update.action === 'new_order') {
+        console.log('New order received');
+        broadcastUpdate(update); // Broadcast the order update to all clients
       } else {
         console.log('Unknown action:', update.action);
       }
@@ -3378,6 +3448,15 @@ wss.on('connection', (ws) => {
     console.log('WebSocket client disconnected');
   });
 });
+
+// Broadcast function to send updates to all connected clients
+function broadcastUpdate(update) {
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(update));
+    }
+  });
+}
 
 // Handle undefined routes
 app.use((req, res) => {
