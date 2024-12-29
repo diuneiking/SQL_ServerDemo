@@ -3327,9 +3327,13 @@ app.delete('/nye_record/:id', (req, res) => {
   });
 });
 
-// API to fetch all orders for the receiver
 app.get('/order-receiver', (req, res) => {
-  const query = 'SELECT * FROM OrderReceiver WHERE isDone = 0';
+  const isDone = req.query.isDone; // Read 'isDone' query parameter from the request
+  let query = 'SELECT * FROM OrderReceiver';
+
+  if (isDone !== undefined) {
+    query += ` WHERE isDone = ${db.escape(isDone)}`; // Add dynamic WHERE clause
+  }
 
   db.query(query, (err, results) => {
     if (err) {
@@ -3341,6 +3345,7 @@ app.get('/order-receiver', (req, res) => {
     res.status(200).send({ success: true, data: results });
   });
 });
+
 
 // API to mark an order as done
 app.patch('/order-receiver/:orderId', (req, res) => {
