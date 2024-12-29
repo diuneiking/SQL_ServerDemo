@@ -3327,6 +3327,26 @@ app.delete('/nye_record/:id', (req, res) => {
   });
 });
 
+app.get('/undoneorder-receiver', (req, res) => {
+  const isDone = req.query.isDone; // Read 'isDone' query parameter from the request
+  let query = 'SELECT * FROM OrderReceiver WHERE isDone = 0';
+
+  if (isDone !== undefined) {
+    query += ` WHERE isDone = ${db.escape(isDone)}`; // Add dynamic WHERE clause
+  }
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching orders:', err);
+      return res
+        .status(500)
+        .send({ success: false, message: 'Internal server error' });
+    }
+    res.status(200).send({ success: true, data: results });
+  });
+});
+
+
 app.get('/order-receiver', (req, res) => {
   const isDone = req.query.isDone; // Read 'isDone' query parameter from the request
   let query = 'SELECT * FROM OrderReceiver';
