@@ -3257,19 +3257,19 @@ app.put('/1updateTableName', (req, res) => {
 });
 
 app.post('/nye_record', (req, res) => {
-  const { terminalid, stool, matT, matH, matS, cardnumber, hiddencard, imageName } = req.body;
+  const { terminalid, stool, matT, matH, matS, handfan, cardnumber, hiddencard, imageName } = req.body;
 
   // Adjust the time to UTC-8
   const currentTime = new Date();
 
   const query = `
-    INSERT INTO nye_record (terminalid, stool, matT, matH, matS, cardnumber, time, hiddenCard, imageName)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO nye_record (terminalid, stool, matT, matH, matS, handfan, cardnumber, time, hiddenCard, imageName)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.query(
     query,
-    [terminalid, stool, matT, matH, matS, cardnumber, currentTime, hiddencard, imageName],
+    [terminalid, stool, matT, matH, matS, handfan, cardnumber, currentTime, hiddencard, imageName],
     (err, result) => {
       if (err) {
         console.error('Error executing query:', err);
