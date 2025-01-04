@@ -15,26 +15,26 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // // Database connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 50,
-  queueLimit: 0
-});
-
-// // Database connection
 // const db = mysql.createPool({
-//   host: 'srv1627.hstgr.io',
-//   user: 'u461355420_superadmin',
-//   password: 'Heehee@2024',
-//   database: 'u461355420_heehee',
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
 //   waitForConnections: true,
-//   connectionLimit: 10,
+//   connectionLimit: 50,
 //   queueLimit: 0
 // });
+
+// // Database connection
+const db = mysql.createPool({
+  host: 'srv1627.hstgr.io',
+  user: 'u461355420_superadmin',
+  password: 'Heehee@2024',
+  database: 'u461355420_heehee',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 
 // Logging middleware for debugging
@@ -166,11 +166,56 @@ app.post('/login', (req, res) => {
   });
 });
 
+app.post('/2login', (req, res) => {
+  const { staffCode, password } = req.body;
+
+  // Ensure staffCode and password are provided
+  if (!staffCode || !password) {
+    return res.status(400).send({ success: false, message: 'StaffCode and Password are required' });
+  }
+
+  const query = 'SELECT * FROM hidden_users WHERE StaffCode = ? AND Password = ?';
+
+  // Query the database with provided staffCode and password
+  db.query(query, [staffCode, password], (err, results) => {
+    if (err) {
+      console.error('Database query error:', err); // Log the error for debugging
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+
+    // Check if a matching user is found
+    if (results.length > 0) {
+      const user = results[0];
+      return res.status(200).send({ success: true, RoleID: user.RoleID, Name: user.Name });
+    } else {
+      // Send a response if the login credentials are invalid
+      return res.status(401).send({ success: false, message: 'Invalid StaffCode or Password' });
+    }
+  });
+});
 
 // Admin login route
 app.post('/admin_login', (req, res) => {
   const { username, password } = req.body;
   const query = 'SELECT * FROM users WHERE StaffCode = ? AND Password = ? AND RoleID = 1';
+  
+  db.query(query, [username, password], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    if (results.length > 0) {
+      res.send({ success: true });
+    } else {
+      res.send({ success: false, message: 'Invalid Admin Username or Password' });
+    }
+  });
+});
+
+// Admin login route
+app.post('/2admin_login', (req, res) => {
+  const { username, password } = req.body;
+  const query = 'SELECT * FROM hidden_users WHERE StaffCode = ? AND Password = ? AND RoleID = 1';
   
   db.query(query, [username, password], (err, results) => {
     if (err) {
@@ -268,6 +313,18 @@ app.get('/items', (req, res) => {
   });
 });
 
+// Fetch items from the items table where Branch = "Heehee"
+app.get('/2items', (req, res) => {
+  const query = 'SELECT * FROM items';
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching items:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results);
+    }
+  });
+});
 
 // Create a new combo set
 app.post('/combo-sets', (req, res) => {
@@ -590,6 +647,64 @@ app.get('/modifiers_and_add_ons', (req, res) => {
   });
 });
 
+app.get('/2modifiers_and_add_ons', (req, res) => {
+  const { itemCode } = req.query;
+
+  if (!itemCode) {
+    return res.status(400).send({ success: false, message: 'itemCode is required' });
+  }
+
+  const query = `
+    SELECT ModifierCode
+    FROM items
+    WHERE ItemCode = ?;
+  `;
+
+  db.query(query, [itemCode], (err, results) => {
+    if (err) {
+      console.error('Database query error:', err);
+      return res.status(500).send({ success: false, message: 'Database query error' });
+    }
+
+    if (results.length > 0 && results[0].ModifierCode) {
+      const modifierCodes = results[0].ModifierCode.split(','); // Split ModifierCode into an array
+
+      // Query to fetch all modifiers and their add-ons
+      const placeholders = modifierCodes.map(() => '?').join(',');
+      const modifiersQuery = `
+        SELECT * FROM modifiers WHERE ModifierCode IN (${placeholders});
+      `;
+      const addOnsQuery = `
+        SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders});
+      `;
+
+      db.query(modifiersQuery, [...modifierCodes], (modErr, modifiers) => {
+        if (modErr) {
+          console.error('Database query error:', modErr);
+          return res.status(500).send({ success: false, message: 'Database query error' });
+        }
+
+        db.query(addOnsQuery, [...modifierCodes], (addOnErr, addOns) => {
+          if (addOnErr) {
+            console.error('Database query error:', addOnErr);
+            return res.status(500).send({ success: false, message: 'Database query error' });
+          }
+
+          res.send({
+            modifiers: modifiers || [],
+            addOns: addOns || [],
+          });
+        });
+      });
+    } else {
+      res.send({
+        modifiers: [],
+        addOns: [],
+      });
+    }
+  });
+});
+
 
 // Fetch modifiers
 app.get('/modifiers', (req, res) => {
@@ -604,6 +719,18 @@ app.get('/modifiers', (req, res) => {
   });
 });
 
+// Fetch modifiers
+app.get('/2modifiers', (req, res) => {
+  const query = 'SELECT * FROM modifiers';
+
+  db.query(query, ['Heehee'], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
 
 // Fetch item add-ons by multiple modifier codes
 app.get('/item_add_ons', (req, res) => {
@@ -630,11 +757,47 @@ app.get('/item_add_ons', (req, res) => {
   });
 });
 
+// Fetch item add-ons by multiple modifier codes
+app.get('/2item_add_ons', (req, res) => {
+  const modifierCodes = req.query.modifierCodes; // Expecting a comma-separated list of modifier codes
+  
+  if (!modifierCodes) {
+    return res.status(400).send({ success: false, message: 'modifierCodes is required' });
+  }
 
+  // Convert comma-separated string into an array
+  const codesArray = modifierCodes.split(',');
+
+  // Create placeholders for SQL query
+  const placeholders = codesArray.map(() => '?').join(',');
+
+  const query = `SELECT * FROM item_add_ons WHERE ModifierCode IN (${placeholders})`;
+
+  db.query(query, [...codesArray], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
 
 // Fetch active discounts
 app.get('/discounts', (req, res) => {
-  const query = 'SELECT * FROM discounts WHERE IsActive = 1';
+  const query = 'SELECT * FROM discounts WHERE IsActive = 1 AND branch = "Heehee"';
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
+
+// Fetch active discounts
+app.get('/2discounts', (req, res) => {
+  const query = 'SELECT * FROM discounts WHERE IsActive = 1 AND branch = "Hidden"';
   
   db.query(query, (err, results) => {
     if (err) {
@@ -696,6 +859,56 @@ app.post('/save_order', (req, res) => {
   });
 });
 
+app.post('/2save_order', (req, res) => {
+  const { orderId, orderDate, totalPrice, items, itemDiscount, billDiscount, serviceCharge, finalPrice, tableName, isTakeAway } = req.body;
+
+  // Log the incoming request for debugging
+  console.log('Incoming request:', req.body);
+
+  // Check if the order already exists
+  const checkQuery = 'SELECT * FROM hidden_unpaid_orders WHERE OrderId = ?';
+  db.query(checkQuery, [orderId], (err, results) => {
+    if (err) {
+      console.error('SQL Error (Check Query):', err.message); // Log the error
+      res.status(500).send({ success: false, message: 'Database query error', error: err.message });
+      return;
+    }
+
+    const itemsJSON = JSON.stringify(items); // Serialize items to JSON for database storage
+
+    if (results.length > 0) {
+      // Update existing order
+      const updateQuery = `
+        UPDATE hidden_unpaid_orders 
+        SET OrderDate = ?, TotalPrice = ?, Items = ?, Discount = ?, FinalPrice = ?, TableName = ?, IsTakeAway = ?, BillDiscount = ?
+        WHERE OrderId = ?
+      `;
+      db.query(updateQuery, [orderDate, totalPrice, itemsJSON, itemDiscount, finalPrice, tableName, isTakeAway ? 1 : 0, billDiscount, orderId], (err, results) => {
+        if (err) {
+          console.error('SQL Error (Update Query):', err.message); // Log the error
+          res.status(500).send({ success: false, message: 'Database query error', error: err.message });
+          return;
+        }
+        res.send({ success: true, message: 'Order updated successfully' });
+      });
+    } else {
+      // Insert new order
+      const insertQuery = `
+        INSERT INTO hidden_unpaid_orders (OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice, TableName, IsTakeAway, BillDiscount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      db.query(insertQuery, [orderId, orderDate, totalPrice, itemsJSON, itemDiscount, finalPrice, tableName, isTakeAway ? 1 : 0, billDiscount], (err, results) => {
+        if (err) {
+          console.error('SQL Error (Insert Query):', err.message); // Log the error
+          res.status(500).send({ success: false, message: 'Database query error', error: err.message });
+          return;
+        }
+        res.send({ success: true, message: 'Order saved successfully' });
+      });
+    }
+  });
+});
+
 // Fetch all orders
 app.get('/orders', (req, res) => {
   const query = 'SELECT * FROM unpaid_orders';
@@ -708,6 +921,20 @@ app.get('/orders', (req, res) => {
     res.send(results);
   });
 });
+
+// Fetch all orders
+app.get('/2orders', (req, res) => {
+  const query = 'SELECT * FROM hidden_unpaid_orders';
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
+
 
 // Fetch order details by orderId
 app.get('/orders/:orderId', (req, res) => {
@@ -727,8 +954,36 @@ app.get('/orders/:orderId', (req, res) => {
   });
 });
 
+// Fetch order details by orderId
+app.get('/2orders/:orderId', (req, res) => {
+  const orderId = req.params.orderId;
+  const query = 'SELECT * FROM hidden_unpaid_orders WHERE OrderId = ?';
+
+  db.query(query, [orderId], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    if (results.length > 0) {
+      res.send(results[0]);
+    } else {
+      res.status(404).send({ success: false, message: 'Order not found' });
+    }
+  });
+});
+
 app.get('/unpaid_orders', (req, res) => {
   db.query('SELECT * FROM unpaid_orders', (err, results) => {
+    if (err) {
+      console.error('Failed to fetch unpaid orders:', err);
+      return res.status(500).json({ error: 'Failed to fetch unpaid orders' });
+    }
+    res.json(results);
+  });
+});
+
+app.get('/2unpaid_orders', (req, res) => {
+  db.query('SELECT * FROM hidden_unpaid_orders', (err, results) => {
     if (err) {
       console.error('Failed to fetch unpaid orders:', err);
       return res.status(500).json({ error: 'Failed to fetch unpaid orders' });
@@ -754,6 +1009,25 @@ app.delete('/orders/:orderId', (req, res) => {
     }
   });
 });
+
+// Delete order by orderId
+app.delete('/2orders/:orderId', (req, res) => {
+  const orderId = req.params.orderId;
+  const query = 'DELETE FROM hidden_unpaid_orders WHERE OrderId = ?';
+
+  db.query(query, [orderId], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    if (results.affectedRows > 0) {
+      res.send({ success: true });
+    } else {
+      res.status(404).send({ success: false, message: 'Order not found' });
+    }
+  });
+});
+
 
 // Fetch total quantity of items sold where ShiftEnded = 1
 app.get('/sales_items/total_quantity', (req, res) => {
@@ -788,6 +1062,33 @@ app.get('/sales_items/total_quantity_by_date', (req, res) => {
     SELECT SUM(si.Quantity) AS TotalQuantity
     FROM sales_items si
     JOIN sales s ON si.SalesId = s.SalesId
+    WHERE s.ShiftEnded = 1 AND DATE(s.OrderDate) = ?
+  `;
+
+  db.query(query, [date], (err, results) => {
+    if (err) {
+      console.error('Error fetching total item quantity for date:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+
+    const totalQuantity = results[0]?.TotalQuantity || 0; // Default to 0 if no rows are returned
+    res.json({ success: true, totalQuantity });
+  });
+});
+
+app.get('/2sales_items/total_quantity_by_date', (req, res) => {
+  const { date } = req.query; // Get the date from the query parameters
+
+  if (!date) {
+    res.status(400).send({ success: false, message: 'Date parameter is required' });
+    return;
+  }
+
+  const query = `
+    SELECT SUM(si.Quantity) AS TotalQuantity
+    FROM hidden_sales_items si
+    JOIN hidden_sales s ON si.SalesId = s.SalesId
     WHERE s.ShiftEnded = 1 AND DATE(s.OrderDate) = ?
   `;
 
@@ -840,9 +1141,38 @@ app.post('/void_item', (req, res) => {
   });
 });
 
+// Voiding an item
+app.post('/2void_item', (req, res) => {
+  const { orderId, voidDetails, voidDate, reason } = req.body;
+
+  const insertQuery = `
+    INSERT INTO hidden_voided_items (OrderId, VoidDetails, VoidDate, Reason)
+    VALUES (?, ?, ?, ?)
+  `;
+  db.query(insertQuery, [orderId, voidDetails, voidDate, reason], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send({ success: true });
+  });
+});
+
 // Fetch voided items by EndedDay
 app.get('/voided_items', (req, res) => {
   const query = `SELECT * FROM voided_items WHERE EndedDay = 0`;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
+
+app.get('/2voided_items', (req, res) => {
+  const query = `SELECT * FROM hidden_voided_items WHERE EndedDay = 0`;
 
   db.query(query, (err, results) => {
     if (err) {
@@ -866,6 +1196,20 @@ app.get('/printers', (req, res) => {
   });
 });
 
+
+// Fetch all printers
+app.get('/2printers', (req, res) => {
+  const query = 'SELECT * FROM hidden_printers';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
+
 // Add a new printer
 app.post('/printers', (req, res) => {
   const { IpAddress } = req.body;
@@ -879,6 +1223,21 @@ app.post('/printers', (req, res) => {
     res.send({ success: true, printerId: results.insertId });
   });
 });
+
+// Add a new printer
+app.post('/2printers', (req, res) => {
+  const { IpAddress } = req.body;
+  const query = 'INSERT INTO hidden_printers (IpAddress) VALUES (?)';
+
+  db.query(query, [IpAddress], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send({ success: true, printerId: results.insertId });
+  });
+});
+
 // Fetch all departments
 app.get('/departments', (req, res) => {
   const query = 'SELECT * FROM department';
@@ -923,7 +1282,36 @@ app.post('/update_printer', (req, res) => {
     }
   );
 });
+app.post('/2update_printer', (req, res) => {
+  const { printerId, printerName, departmentIds, isOrderSlipPrinter, isReceiptPrinter } = req.body;
 
+  if (!Array.isArray(departmentIds)) {
+    return res.status(400).send({ error: 'Invalid department IDs' });
+  }
+
+  const query = `
+    UPDATE hidden_printers 
+    SET PrinterName = ?, DepartmentID = ?, IsOrderSlipPrinter = ?, IsReceiptPrinter = ? 
+    WHERE PrinterID = ?`;
+
+  db.query(
+    query,
+    [
+      printerName,
+      departmentIds[0] || null, // Use the first department ID, or null if empty
+      isOrderSlipPrinter,
+      isReceiptPrinter,
+      printerId,
+    ],
+    (err, result) => {
+      if (err) {
+        console.error('Failed to update printer:', err);
+        return res.status(500).send({ error: 'Failed to update printer' });
+      }
+      res.send({ success: true });
+    }
+  );
+});
 app.delete('/delete_printer/:printerId', (req, res) => {
   const printerId = req.params.printerId;
 
@@ -938,6 +1326,22 @@ app.delete('/delete_printer/:printerId', (req, res) => {
     res.send({ success: true });
   });
 });
+
+app.delete('/2delete_printer/:printerId', (req, res) => {
+  const printerId = req.params.printerId;
+
+  const query = 'DELETE FROM hidden_printers WHERE PrinterID = ?';
+
+  db.query(query, [printerId], (err, result) => {
+    if (err) {
+      console.error('Failed to delete printer:', err);
+      return res.status(500).send({ error: 'Failed to delete printer' });
+    }
+
+    res.send({ success: true });
+  });
+});
+
 // Fetch service charge settings
 app.get('/service_charge', (req, res) => {
   const query = 'SELECT * FROM settings WHERE SettingName IN ("ServiceChargeEnabled", "ServiceChargePercentage")';
@@ -969,6 +1373,20 @@ app.get('/payment_methods', (req, res) => {
       res.json(results);
   });
 });
+
+// Fetch payment methods
+app.get('/2payment_methods', (req, res) => {
+  const query = 'SELECT * FROM hidden_payment_methods WHERE IsActive = 1'; // Fetch only active payment methods
+
+  db.query(query, (err, results) => {
+      if (err) {
+          console.error('Failed to fetch payment methods:', err);
+          return res.status(500).json({ error: 'Failed to fetch payment methods' });
+      }
+      res.json(results);
+  });
+});
+
 
 app.post('/insert_sales_data', (req, res) => {
   const {
@@ -1178,6 +1596,288 @@ app.post('/insert_sales_data', (req, res) => {
             .then(() => {
               const insertInvoicesQuery = `
                 INSERT INTO invoices (
+                  OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding,
+                  ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway,
+                  discountCode, discountName, discountType, TenderedCash, Changes,
+                  ItemDiscount, BillDiscount
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `;
+
+              const orderItemsJson = JSON.stringify(
+                orderItems.map((item) => ({
+                  ...item,
+                  SelectedAddOns: item.SelectedAddOns || [],
+                }))
+              );
+
+              connection.query(
+                insertInvoicesQuery,
+                [
+                  orderId,
+                  totalItemPrice,
+                  JSON.stringify(paymentDetails),
+                  billDiscount,
+                  serviceCharge,
+                  rounding,
+                  orderItemsJson,
+                  userName,
+                  finalPrice,
+                  tableName,
+                  isTakeAway ? 1 : 0,
+                  discountCode,
+                  discountName,
+                  discountType,
+                  tenderedCash,
+                  changes,
+                  itemDiscount,  // total item discount
+                  billDiscount
+                ],
+                (err, result) => {
+                  if (err) {
+                    console.error('Failed to insert into invoices:', err);
+                    return connection.rollback(() => {
+                      connection.release();
+                      res.status(500).send('Failed to insert invoices');
+                    });
+                  }
+
+                  connection.commit((err) => {
+                    if (err) {
+                      console.error('Failed to commit transaction:', err);
+                      return connection.rollback(() => {
+                        connection.release();
+                        res.status(500).send('Failed to commit transaction');
+                      });
+                    }
+
+                    connection.release();
+                    res.status(200).send('Sales data inserted successfully');
+                  });
+                }
+              );
+            })
+            .catch((err) => {
+              console.error('Error processing sales items:', err.message);
+              connection.rollback(() => {
+                connection.release();
+                res.status(400).send(`Failed to insert sales items: ${err.message}`);
+              });
+            });
+        }
+      );
+    });
+  });
+});
+
+app.post('/2insert_sales_data', (req, res) => {
+  const {
+    orderId,
+    orderItems,
+    totalPrice,
+    paymentDetails,
+    discount: itemDiscount, // sum of item-level discount
+    billDiscount,
+    serviceCharge,
+    rounding,
+    completedBy: userName,
+    tableName,
+    isTakeAway,
+    discountCode,
+    discountName,
+    discountType,
+    tenderedCash,
+    itemDiscountCode,
+    itemDiscountName,
+    itemDiscountType,
+    changes,
+  } = req.body;
+
+  if (!userName) {
+    console.error('CompletedBy (userName) is null or undefined');
+    return res.status(400).send('CompletedBy field is required');
+  }
+
+  if (!orderItems || orderItems.length === 0) {
+    console.error('Order items are empty');
+    return res.status(400).send('Order items cannot be empty');
+  }
+
+  const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
+  const totalItemPrice = orderItems.reduce((sum, item) => sum + item.Price * item.Quantity, 0);
+  const finalPrice = totalItemPrice - billDiscount + calculatedServiceCharge + rounding;
+
+  db.getConnection((err, connection) => {
+    if (err) {
+      console.error('Failed to get database connection:', err);
+      return res.status(500).send('Failed to connect to database');
+    }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        console.error('Failed to begin transaction:', err);
+        connection.release();
+        return res.status(500).send('Failed to begin transaction');
+      }
+
+      // Insert into sales
+      const insertSalesQuery = `
+        INSERT INTO hidden_sales (
+          OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails,
+          ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway,
+          discountCode, discountName, discountType, TenderedCash, Changes,
+          ItemDiscount, BillDiscount
+        )
+        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      connection.query(
+        insertSalesQuery,
+        [
+          orderId,
+          totalItemPrice,
+          finalPrice,
+          JSON.stringify(paymentDetails),
+          calculatedServiceCharge,
+          rounding,
+          userName,
+          tableName,
+          isTakeAway ? 1 : 0,
+          discountCode,
+          discountName,
+          discountType,
+          tenderedCash,
+          changes,
+          itemDiscount, // sum of item-level discount
+          billDiscount
+        ],
+        (err, result) => {
+          if (err) {
+            console.error('Failed to insert into sales:', err);
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).send('Failed to insert sales data');
+            });
+          }
+
+          const salesId = result.insertId;
+
+          // Insert each line item
+          const insertSalesItemsPromises = orderItems.map((item) => {
+            return new Promise((resolve, reject) => {
+              const deductInventoryQuery = `
+                UPDATE items
+                SET Inventory = CASE
+                  WHEN Inventory IS NOT NULL AND Inventory >= ? THEN Inventory - ?
+                  ELSE Inventory
+                END
+                WHERE ItemCode = ?
+              `;
+              const deductPortionQuery = `
+                UPDATE items
+                SET \`Portion\` = CASE
+                  WHEN \`Portion\` IS NOT NULL AND \`Portion\` >= ? THEN \`Portion\` - ?
+                  ELSE \`Portion\`
+                END
+                WHERE \`ItemCode\` = ?
+              `;
+
+              connection.query(
+                deductInventoryQuery,
+                [item.Quantity, item.Quantity, item.ItemCode],
+                (err, results) => {
+                  if (err || results.affectedRows === 0) {
+                    const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
+                    console.error(errorMsg, err);
+                    return reject(new Error(errorMsg));
+                  }
+
+                  connection.query(
+                    deductPortionQuery,
+                    [item.Quantity, item.Quantity, item.ItemCode],
+                    (err, results) => {
+                      if (err || results.affectedRows === 0) {
+                        const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode}`;
+                        console.error(errorMsg, err);
+                        return reject(new Error(errorMsg));
+                      }
+
+                      // (A) Parse numeric item discount if you stored it
+                      // e.g. item.ItemDiscountValue or derive from negative add-on
+                      let lineItemDiscount = 0;
+                      // If you have `ItemDiscountValue`, do:
+                      // lineItemDiscount = parseFloat(item.ItemDiscountValue) || 0;
+
+                      // (B) If the user sets item.ItemDiscountCode / item.ItemDiscountName / item.ItemDiscountType, read them:
+                      const lineItemDiscountCode = item.ItemDiscountCode || '';
+                      const lineItemDiscountName = item.ItemDiscountName || '';
+                      const lineItemDiscountType = item.ItemDiscountType || '';
+
+                      // (C) Final price = Price - lineItemDiscount
+                      const itemPrice = parseFloat(item.Price) || 0;
+                      const itemFinalPrice = itemPrice - lineItemDiscount;
+
+                      const insertSalesItemsQuery = `
+                        INSERT INTO hidden_sales_items (
+                          SalesId,
+                          ItemCode,
+                          ItemName,
+                          Quantity,
+                          Price,
+                          OrderID,
+                          Discount,
+                          FinalPrice,
+                          Remark,
+                          ModifierCode,
+                          AddOns,
+                          IsTakeAway,
+                          ItemDiscountCode,
+                          ItemDiscountName,
+                          ItemDiscountType
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      `;
+
+                      connection.query(
+                        insertSalesItemsQuery,
+                        [
+                          salesId,
+                          item.ItemCode,
+                          item.ItemName,
+                          item.Quantity,
+                          item.Price,
+                          orderId,
+                          lineItemDiscount,  // numeric discount
+                          itemFinalPrice,
+                          item.Remark || '',
+                          item.ModifierCode || '',
+                          JSON.stringify(item.SelectedAddOns || []),
+                          isTakeAway ? 1 : 0,
+                          lineItemDiscountCode,   // store item-level discount code
+                          lineItemDiscountName,   // store item-level discount name
+                          lineItemDiscountType,   // store item-level discount type
+                        ],
+                        (err, result) => {
+                          if (err) {
+                            console.error(
+                              `Failed to insert sales_items for ItemCode ${item.ItemCode}:`,
+                              err
+                            );
+                            return reject(err);
+                          }
+                          resolve(result);
+                        }
+                      );
+                    }
+                  );
+                }
+              );
+            });
+          });
+
+          Promise.all(insertSalesItemsPromises)
+            .then(() => {
+              const insertInvoicesQuery = `
+                INSERT INTO hidden_invoices (
                   OrderID, TotalPrice, PaymentDetails, Discount, ServiceCharge, Rounding,
                   ItemsDetails, CompletedBy, NetTotal, Timestamp, TableName, IsTakeAway,
                   discountCode, discountName, discountType, TenderedCash, Changes,
@@ -1625,6 +2325,27 @@ app.delete('/unpaid_orders/:orderId', (req, res) => {
   });
 });
 
+app.delete('/2unpaid_orders/:orderId', (req, res) => {
+  const orderId = req.params.orderId;
+
+  const query = 'DELETE FROM hidden_unpaid_orders WHERE OrderId = ?';
+  db.query(query, [orderId], (err, result) => {
+    if (err) {
+      console.error('Failed to delete unpaid order:', err);
+      return res.status(500).send('Failed to delete unpaid order');
+    }
+
+    if (result.affectedRows > 0) {
+      res.send('Unpaid order deleted successfully');
+    } else {
+      // Inform that no matching order was found but continue
+      console.warn(`No unpaid order found with OrderId: ${orderId}`);
+      res.status(404).send('Order not found');
+    }
+  });
+});
+
+
 
 app.delete('/delete_unpaid_orders', (req, res) => {
   const deleteQuery = `DELETE FROM unpaid_orders`;
@@ -1751,11 +2472,127 @@ app.post('/reverse_order', (req, res) => {
   });
 });
 
+app.post('/2reverse_order', (req, res) => {
+  const { orderId } = req.body;
+
+  // Query the invoice details before deleting
+  const selectInvoiceQuery = `SELECT * FROM hidden_invoices WHERE OrderID = ?`;
+
+  db.query(selectInvoiceQuery, [orderId], (err, results) => {
+    if (err) {
+      console.error('Failed to fetch invoice details:', err);
+      return res.status(500).send('Failed to fetch invoice details');
+    }
+
+    if (results.length === 0) {
+      console.error(`Invoice not found for OrderID: ${orderId}`);
+      return res.status(404).send('Invoice not found');
+    }
+
+    const invoice = results[0];
+
+
+    // Convert ItemsDetails to match normal unpaid order format
+    let itemsDetails = JSON.parse(invoice.ItemsDetails || '[]');
+    itemsDetails = itemsDetails.map(item => ({
+      itemCode: item.ItemCode,
+      itemName: item.ItemName,
+      price: item.Price,
+      quantity: item.Quantity,
+      remark: item.Remark,
+      selectedAddOns: item.SelectedAddOns.map(addOn => ({
+        addOnID: addOn.AddOnID,        // Add the AddOnID for consistency
+        addOnName: addOn.AddOnName,
+        addOnPrice: addOn.AddOnPrice,
+        modifierCode: addOn.ModifierCode || '',  // Default to empty string if ModifierCode is missing
+      })) || [],
+    }));
+    
+
+
+    // Calculate the TotalPrice and FinalPrice without discounts and service charges
+    const totalPrice = itemsDetails.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const finalPrice = totalPrice;
+
+
+    // Proceed to delete from sales_items, sales, and invoices
+    const deleteSalesItemsQuery = `
+      DELETE FROM hidden_sales_items 
+      WHERE OrderID = ?`;
+
+    db.query(deleteSalesItemsQuery, [orderId], (err, result) => {
+      if (err) {
+        console.error('Failed to delete from sales_items:', err);
+        return res.status(500).send('Failed to delete from sales_items');
+      }
+
+      const deleteSalesQuery = `
+        DELETE FROM hidden_sales 
+        WHERE OrderID = ?`;
+
+      db.query(deleteSalesQuery, [orderId], (err, result) => {
+        if (err) {
+          console.error('Failed to delete from sales:', err);
+          return res.status(500).send('Failed to delete from sales');
+        }
+
+        const deleteInvoicesQuery = `
+          DELETE FROM hidden_invoices 
+          WHERE OrderID = ?`;
+
+        db.query(deleteInvoicesQuery, [orderId], (err, result) => {
+          if (err) {
+            console.error('Failed to delete from invoices:', err);
+            return res.status(500).send('Failed to delete from invoices');
+          }
+
+            const insertUnpaidOrderQuery = `
+            INSERT INTO hidden_unpaid_orders (OrderID, OrderDate, TotalPrice, Items, Discount, FinalPrice, TableName, IsTakeAway)
+            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?)
+          `;
+          
+          const insertValues = [
+            invoice.OrderID,
+            totalPrice, // Use calculated totalPrice
+            JSON.stringify(itemsDetails), // Insert the normalized itemsDetails with full add-ons
+            invoice.Discount || 0, // Default to 0 if Discount is null
+            finalPrice, // Use the same calculated value as FinalPrice
+            invoice.TableName || '-',
+            invoice.IsTakeAway || 0, // Default to 0 if IsTakeAway is null
+          ];
+          
+          db.query(insertUnpaidOrderQuery, insertValues, (err, result) => {
+            if (err) {
+              return res.status(500).send('Failed to insert back into unpaid_orders');
+            }
+          
+            res.status(200).send('Order reversed and reinserted into unpaid orders successfully');
+          });
+        });
+      });
+    });
+  });
+});
 
 //fetch invoices
 app.get('/invoices/today', (req, res) => {
   const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
   const query = `SELECT * FROM invoices WHERE DATE(Timestamp) = ?`;
+  
+  db.query(query, [today], (err, results) => {
+    if (err) {
+      console.error('Error fetching invoices:', err);
+      res.status(500).json([]);
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+//fetch invoices
+app.get('/2invoices/today', (req, res) => {
+  const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+  const query = `SELECT * FROM hidden_invoices WHERE DATE(Timestamp) = ?`;
   
   db.query(query, [today], (err, results) => {
     if (err) {
@@ -1786,10 +2623,49 @@ app.get('/invoices/all', (req, res) => {
   });
 });
 
+app.get('/2invoices/all', (req, res) => {
+
+  const query = `SELECT * FROM hidden_invoices`; // Fetch all invoices without any date filter
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error executing SQL query:', err);
+      return res.status(500).json({ message: 'Failed to fetch invoices' });
+    }
+
+
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'No invoices found' });
+    }
+
+    res.status(200).json(results);
+  });
+});
+
+
 
 app.get('/invoices/:orderId', (req, res) => {
   const orderId = req.params.orderId;
   const query = 'SELECT * FROM invoices WHERE OrderID = ?';
+
+  db.query(query, [orderId], (err, results) => {
+    if (err) {
+      console.error('Error fetching invoice:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    if (results.length > 0) {
+      res.send(results[0]);
+    } else {
+      res.status(404).send({ success: false, message: 'Invoice not found' });
+    }
+  });
+});
+
+
+app.get('/2invoices/:orderId', (req, res) => {
+  const orderId = req.params.orderId;
+  const query = 'SELECT * FROM hidden_invoices WHERE OrderID = ?';
 
   db.query(query, [orderId], (err, results) => {
     if (err) {
@@ -1865,10 +2741,43 @@ app.post('/insert_payout', (req, res) => {
   });
 });
 
+// Insert a new payout
+app.post('/2insert_payout', (req, res) => {
+  const { payoutTo, payoutAmount, recordedBy, payoutTimeDate, isEndOfDay } = req.body;
+  
+  const query = `
+    INSERT INTO hidden_payouts (PayoutTo, PayoutAmount, RecordedBy, PayoutTimeDate, IsEndOfDay)
+    VALUES (?, ?, ?, ?, 0)
+  `;
+  
+  db.query(query, [payoutTo, payoutAmount, recordedBy, payoutTimeDate, isEndOfDay], (err, result) => {
+    if (err) {
+      console.error('Failed to insert payout:', err);
+      return res.status(500).send({ success: false, message: 'Failed to insert payout' });
+    }
+    res.send({ success: true, payoutId: result.insertId });
+  });
+});
+
 // Update backend route to handle selected date
 app.get('/payouts/today', (req, res) => {
   const selectedDate = req.query.date || new Date().toISOString().split('T')[0]; // Default to today's date if no date is provided
   const query = `SELECT * FROM payouts WHERE DATE(PayoutTimeDate) = ?`;
+
+  db.query(query, [selectedDate], (err, results) => {
+    if (err) {
+      console.error('Error fetching payouts:', err);
+      res.status(500).json({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.json(results);
+  });
+});
+
+// Update backend route to handle selected date
+app.get('/2payouts/today', (req, res) => {
+  const selectedDate = req.query.date || new Date().toISOString().split('T')[0]; // Default to today's date if no date is provided
+  const query = `SELECT * FROM hidden_payouts WHERE DATE(PayoutTimeDate) = ?`;
 
   db.query(query, [selectedDate], (err, results) => {
     if (err) {
@@ -1931,6 +2840,55 @@ app.post('/items', (req, res) => {
   );
 });
 
+// Add a new item
+app.post('/2items', (req, res) => {
+  const {
+    ItemCode,
+    ItemName,
+    Price,
+    Category,
+    SKU,
+    DepartmentName,
+    DepartmentID,
+    Inventory,
+    IsInactive,
+    ModifierCode,
+    AutoMod,
+    Branch
+  } = req.body;
+
+
+  const query = `
+    INSERT INTO items 
+    (ItemCode, ItemName, Price, Category, SKU, DepartmentName, DepartmentID, Inventory, IsInactive, ModifierCode, AutoMod, Branch) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(
+    query,
+    [
+      ItemCode,
+      ItemName,
+      Price,
+      Category,
+      SKU || null,        // Use null if SKU is not provided
+      DepartmentName,
+      DepartmentID,
+      Inventory || null,  // Use null if Inventory is not provided
+      IsInactive,
+      ModifierCode || null, // Use null if ModifierCode is not provided
+      AutoMod || 0,        // Default AutoMod to 0 if not provided
+      Branch || 0,       
+    ],
+    (err, results) => {
+      if (err) {
+        console.error('Failed to insert new item:', err);
+        return res.status(500).send({ success: false, message: 'Failed to insert new item' });
+      }
+      res.send({ success: true, itemId: results.insertId });
+    }
+  );
+});
 
 // Fetch an item by ItemCode
 app.get('/items/:itemCode', (req, res) => {
@@ -2052,11 +3010,43 @@ app.get('/company_info', (req, res) => {
   });
 });
 
+// Fetch company details
+app.get('/2company_info', (req, res) => {
+  const query = 'SELECT * FROM hidden_company_info';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch company details:', err);
+      return res.status(500).send({ success: false, message: 'Failed to fetch company details' });
+    }
+    res.send(results);
+  });
+});
+
+
 app.post('/add_user', (req, res) => {
   const { StaffCode, Password, Name, Role, RoleID, Team, CardNumber } = req.body;
 
   const sql = `
     INSERT INTO users (StaffCode, Password, Name, Role, RoleID, Team, CardNumber)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(sql, [StaffCode, Password, Name, Role, RoleID, Team, CardNumber], (err, result) => {
+    if (err) {
+      console.error('Error inserting user:', err);
+      res.status(500).json({ success: false, message: 'Failed to insert user' });
+      return;
+    }
+    res.status(200).json({ success: true, message: 'User inserted successfully' });
+  });
+});
+
+app.post('/2add_user', (req, res) => {
+  const { StaffCode, Password, Name, Role, RoleID, Team, CardNumber } = req.body;
+
+  const sql = `
+    INSERT INTO hidden_users (StaffCode, Password, Name, Role, RoleID, Team, CardNumber)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `;
 
@@ -2092,10 +3082,47 @@ app.post('/create_user', (req, res) => {
     }
   );
 });
+// Endpoint to create a new user
+app.post('/2create_user', (req, res) => {
+  const { staffCode, password, name, role, roleID, team, cardNumber } = req.body;
+
+  const query = `
+    INSERT INTO hidden_users (StaffCode, Password, Name, Role, RoleID, Team, CardNumber)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(
+    query,
+    [staffCode, password, name, role, roleID, team, cardNumber],
+    (err, result) => {
+      if (err) {
+        console.error('Failed to insert user:', err);
+        res.status(500).json({ success: false, message: 'Failed to create user' });
+        return;
+      }
+      res.json({ success: true, message: 'User created successfully' });
+    }
+  );
+});
 
 // Endpoint to fetch teams
 app.get('/teams', (req, res) => {
   const query = 'SELECT TeamID, TeamName FROM team';
+
+  // Use the 'db' connection instead of 'pool'
+  db.query(query, (error, results) => {
+    if (error) {
+      console.error('Error fetching teams:', error);
+      res.status(500).json({ error: 'Failed to fetch teams' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+// Endpoint to fetch teams
+app.get('/2teams', (req, res) => {
+  const query = 'SELECT TeamID, TeamName FROM hidden_team';
 
   // Use the 'db' connection instead of 'pool'
   db.query(query, (error, results) => {
@@ -2122,10 +3149,40 @@ app.get('/users', (req, res) => {
   });
 });
 
+// Endpoint to fetch all users
+app.get('/2users', (req, res) => {
+  const query = 'SELECT * FROM hidden_users';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error fetching users:', err);
+      res.status(500).json({ success: false, message: 'Failed to fetch users' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
 app.get('/sales/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
   const query = `
     SELECT * FROM sales WHERE CompletedBy = ? AND ShiftEnded = 0
+  `;
+
+  db.query(query, [completedBy], (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales:', err);
+      return res.status(500).send({ success: false, message: 'Failed to fetch sales' });
+    }
+    res.send(results);
+  });
+});
+
+app.get('/2sales/:completedBy', (req, res) => {
+  const completedBy = req.params.completedBy;
+  const query = `
+    SELECT * FROM hidden_sales WHERE CompletedBy = ? AND ShiftEnded = 0
   `;
 
   db.query(query, [completedBy], (err, results) => {
@@ -2142,6 +3199,23 @@ app.get('/sales/waitingendday', (req, res) => {
   const query = `
     SELECT * 
     FROM sales 
+    WHERE ShiftEnded = 1 AND Ended_day = 0
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales:', err);
+      return res.status(500).send({ success: false, message: 'Failed to fetch sales' });
+    }
+    res.send(results); // Send the filtered results
+  });
+});
+
+app.get('/2sales/waitingendday', (req, res) => {
+  // SQL query to fetch sales where ShiftEnded = 1 AND Ended_day = 0
+  const query = `
+    SELECT * 
+    FROM hidden_sales 
     WHERE ShiftEnded = 1 AND Ended_day = 0
   `;
 
@@ -2175,10 +3249,46 @@ app.put('/sales/end_day', (req, res) => {
   });
 });
 
+// Update Ended_day = 1 for all sales where ShiftEnded = 1
+app.put('/2sales/end_day', (req, res) => {
+  const query = `
+    UPDATE hidden_sales 
+    SET Ended_day = 1 
+    WHERE ShiftEnded = 1 AND Ended_day = 0
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Failed to update Ended_day status:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update Ended_day status' });
+    }
+
+    res.send({
+      success: true,
+      message: `End day process completed successfully. ${result.affectedRows} rows updated.`,
+    });
+  });
+});
+
 app.put('/sales/end_shift/:completedBy', (req, res) => {
   const completedBy = req.params.completedBy;
   const query = `
     UPDATE sales SET ShiftEnded = 1 WHERE CompletedBy = ? AND ShiftEnded = 0
+  `;
+
+  db.query(query, [completedBy], (err, result) => {
+    if (err) {
+      console.error('Failed to update ShiftEnded status:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update ShiftEnded status' });
+    }
+    res.send({ success: true, message: 'Shift ended successfully' });
+  });
+});
+
+app.put('/2sales/end_shift/:completedBy', (req, res) => {
+  const completedBy = req.params.completedBy;
+  const query = `
+    UPDATE hidden_sales SET ShiftEnded = 1 WHERE CompletedBy = ? AND ShiftEnded = 0
   `;
 
   db.query(query, [completedBy], (err, result) => {
@@ -2212,6 +3322,27 @@ app.get('/sales', (req, res) => {
   });
 });
 
+app.get('/2sales', (req, res) => {
+  const shiftEnded = req.query.shiftEnded; // Get the ShiftEnded parameter
+  const endedDay = req.query.endedDay; // Get the Ended_day parameter
+
+  // Add dynamic condition for Ended_day
+  const query = `
+    SELECT * 
+    FROM hidden_sales 
+    WHERE ShiftEnded = ? 
+    AND Ended_day = ?
+  `;
+
+  db.query(query, [shiftEnded, endedDay], (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales:', err);
+      res.status(500).json({ success: false, message: 'Database query error' });
+    } else {
+      res.json(results);
+    }
+  });
+});
 
 // Endpoint to fetch payouts with IsEndOfDay and ShiftEnded status
 app.get('/payouts', (req, res) => {
@@ -2219,6 +3350,24 @@ app.get('/payouts', (req, res) => {
   const shiftEnded = req.query.shiftEnded; // Get the shiftEnded parameter from the query string
 
   const query = 'SELECT * FROM payouts WHERE ShiftEnded = ? AND IsEndOfDay = ?';
+
+  // Correctly pass both parameters in a single array
+  db.query(query, [shiftEnded, isEndOfDay], (err, results) => {
+    if (err) {
+      console.error('Failed to fetch payouts:', err);
+      res.status(500).json({ success: false, message: 'Database query error' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+// Endpoint to fetch payouts with IsEndOfDay and ShiftEnded status
+app.get('/2payouts', (req, res) => {
+  const isEndOfDay = req.query.isEndOfDay; // Get the isEndOfDay parameter from the query string
+  const shiftEnded = req.query.shiftEnded; // Get the shiftEnded parameter from the query string
+
+  const query = 'SELECT * FROM hidden_payouts WHERE ShiftEnded = ? AND IsEndOfDay = ?';
 
   // Correctly pass both parameters in a single array
   db.query(query, [shiftEnded, isEndOfDay], (err, results) => {
@@ -2262,6 +3411,35 @@ app.post('/end_shift', (req, res) => {
   });
 });
 
+// Endpoint to end shift and insert details into shift_end table
+app.post('/2end_shift', (req, res) => {
+ 
+  const {
+    completedBy,
+    totalSales,
+    cashSales,
+    declaredCash,
+    discrepancy,
+    totalPayouts,
+    shiftEndTime,
+    serviceCharge,  // New field
+    billDiscount    // New field
+  } = req.body;
+
+  const query = `
+    INSERT INTO hidden_shift_end (UserName, TotalSales, CashSales, DeclaredCash, Discrepancy, TotalPayouts, ShiftEndTime, ServiceCharge, BillDiscount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(query, [completedBy, totalSales, cashSales, declaredCash, discrepancy, totalPayouts, shiftEndTime, serviceCharge, billDiscount], (err, result) => {
+    if (err) {
+      console.error('Failed to end shift:', err);
+      res.status(500).send('Failed to end shift');
+    } else {
+      res.send({ success: true, message: 'Shift ended successfully' });
+    }
+  });
+});
 
 // Endpoint to update sales shiftEnded status
 app.put('/update_sales_shift_ended', (req, res) => {
@@ -2269,6 +3447,26 @@ app.put('/update_sales_shift_ended', (req, res) => {
 
   const query = `
     UPDATE sales 
+    SET ShiftEnded = ? 
+    WHERE CompletedBy = ? AND ShiftEnded = 0
+  `;
+
+  db.query(query, [shiftEnded, completedBy], (err, result) => {
+    if (err) {
+      console.error('Failed to update sales shiftEnded status:', err);
+      res.status(500).send('Failed to update sales shiftEnded status');
+    } else {
+      res.send({ success: true, message: 'Sales shiftEnded status updated successfully' });
+    }
+  });
+});
+
+// Endpoint to update sales shiftEnded status
+app.put('/2update_sales_shift_ended', (req, res) => {
+  const { completedBy, shiftEnded } = req.body;
+
+  const query = `
+    UPDATE hidden_sales 
     SET ShiftEnded = ? 
     WHERE CompletedBy = ? AND ShiftEnded = 0
   `;
@@ -2303,6 +3501,25 @@ app.put('/update_payouts_shift_ended', (req, res) => {
   });
 });
 
+// Endpoint to update ShiftEnded status in payouts
+app.put('/2update_payouts_shift_ended', (req, res) => {
+  const { recordedBy, shiftEnded } = req.body; // Corrected variable name
+
+  const query = `
+    UPDATE hidden_payouts 
+    SET ShiftEnded = ? 
+    WHERE RecordedBy = ? AND ShiftEnded = 0
+  `;
+
+  db.query(query, [shiftEnded, recordedBy], (err, result) => {
+    if (err) {
+      console.error('Failed to update payouts ShiftEnded status:', err);
+      res.status(500).send('Failed to update payouts ShiftEnded status');
+    } else {
+      res.send({ success: true, message: 'Payouts ShiftEnded status updated successfully' });
+    }
+  });
+});
 
 // Endpoint to update IsEndOfDay status in payouts
 app.put('/update_payouts_is_end_of_day', (req, res) => {
@@ -2310,6 +3527,26 @@ app.put('/update_payouts_is_end_of_day', (req, res) => {
 
   const query = `
     UPDATE payouts 
+    SET IsEndOfDay = ? 
+    WHERE RecordedBy = ? AND IsEndOfDay = 0
+  `;
+
+  db.query(query, [isEndOfDay, recordedBy], (err, result) => {
+    if (err) {
+      console.error('Failed to update payouts IsEndOfDay status:', err);
+      res.status(500).send('Failed to update payouts IsEndOfDay status');
+    } else {
+      res.send({ success: true, message: 'Payouts IsEndOfDay status updated successfully' });
+    }
+  });
+});
+
+// Endpoint to update IsEndOfDay status in payouts
+app.put('/2update_payouts_is_end_of_day', (req, res) => {
+  const { recordedBy, isEndOfDay } = req.body;
+
+  const query = `
+    UPDATE hidden_payouts 
     SET IsEndOfDay = ? 
     WHERE RecordedBy = ? AND IsEndOfDay = 0
   `;
@@ -2341,6 +3578,23 @@ app.get('/shift_end/not_ended', (req, res) => {
   });
 });
 
+// Fetch all shifts not ended, grouped by UserName
+app.get('/2shift_end/not_ended', (req, res) => {
+  const query = `
+    SELECT * FROM hidden_shift_end 
+    WHERE Ended = 0;
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch not ended shifts:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
+
 // Fetch all shifts that have ended, grouped by UserName
 app.get('/shift_end/ended', (req, res) => {
   const query = `
@@ -2358,10 +3612,41 @@ app.get('/shift_end/ended', (req, res) => {
   });
 });
 
+// Fetch all shifts that have ended, grouped by UserName
+app.get('/2shift_end/ended', (req, res) => {
+  const query = `
+    SELECT * FROM hidden_shift_end 
+    WHERE Ended = 1;
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch ended shifts:', err);
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    res.send(results);
+  });
+});
 
 // Fetch sales where IsEndOfDay = 0
 app.get('/sales/not-ended', (req, res) => {
   const query = 'SELECT * FROM sales WHERE IsEndOfDay = 0';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch sales data:', err);
+      res.status(500).json({ error: 'Failed to fetch sales data' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
+// Fetch sales where IsEndOfDay = 0
+app.get('/2sales/not-ended', (req, res) => {
+  const query = 'SELECT * FROM hidden_sales WHERE IsEndOfDay = 0';
 
   db.query(query, (err, results) => {
     if (err) {
@@ -2379,6 +3664,26 @@ app.put('/update_invoices_shift_ended', (req, res) => {
 
   const query = `
     UPDATE invoices
+    SET ShiftEnded = ?
+    WHERE CompletedBy = ? AND ShiftEnded = 0
+  `;
+
+  db.query(query, [shiftEnded, completedBy], (err, result) => {
+    if (err) {
+      console.error('Failed to update invoices ShiftEnded status:', err);
+      res.status(500).send('Failed to update invoices ShiftEnded status');
+    } else {
+      res.send({ success: true, message: 'Invoices ShiftEnded status updated successfully' });
+    }
+  });
+});
+
+// Endpoint to update ShiftEnded status in invoices
+app.put('/2update_invoices_shift_ended', (req, res) => {
+  const { completedBy, shiftEnded } = req.body;
+
+  const query = `
+    UPDATE hidden_invoices
     SET ShiftEnded = ?
     WHERE CompletedBy = ? AND ShiftEnded = 0
   `;
@@ -2567,6 +3872,28 @@ app.put('/update_order_table_name', (req, res) => {
   });
 });
 
+// Endpoint to update the table name of an existing order
+app.put('/2update_order_table_name', (req, res) => {
+  const { orderId, newTableName } = req.body; // Extract orderId and newTableName from request body
+
+  // SQL query to update the table name for the given order ID
+  const query = 'UPDATE hidden_unpaid_orders SET TableName = ? WHERE OrderId = ?';
+
+  db.query(query, [newTableName, orderId], (err, result) => {
+    if (err) {
+      console.error('Error updating table name:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update table name' });
+    }
+
+    if (result.affectedRows > 0) {
+      res.send({ success: true, message: 'Table name updated successfully' });
+    } else {
+      res.status(404).send({ success: false, message: 'Order not found' });
+    }
+  });
+});
+
+
 app.get('/end-day-history', (req, res) => {
     const query = 'SELECT * FROM end_day ORDER BY StartTime DESC';
     db.query(query, (err, results) => {
@@ -2579,11 +3906,38 @@ app.get('/end-day-history', (req, res) => {
     });
 });
 
+app.get('/2end-day-history', (req, res) => {
+  const query = 'SELECT * FROM hidden_end_day ORDER BY StartTime DESC';
+  db.query(query, (err, results) => {
+      if (err) {
+          console.error('Failed to fetch end-day history:', err);
+          res.status(500).json({ success: false, message: 'Database query error' });
+      } else {
+          res.json(results);
+      }
+  });
+});
 
 // Endpoint to check if a day entry exists for today
 app.get('/check_day_entry_exists', (req, res) => {
   const today = new Date().toISOString().slice(0, 10); // Get today's date in YYYY-MM-DD format
   const query = `SELECT COUNT(*) AS count FROM end_day WHERE DATE(StartTime) = ?`;
+  
+  db.query(query, [today], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    
+    const exists = results[0].count > 0;
+    res.send({ exists });
+  });
+});
+
+// Endpoint to check if a day entry exists for today
+app.get('/2check_day_entry_exists', (req, res) => {
+  const today = new Date().toISOString().slice(0, 10); // Get today's date in YYYY-MM-DD format
+  const query = `SELECT COUNT(*) AS count FROM hidden_end_day WHERE DATE(StartTime) = ?`;
   
   db.query(query, [today], (err, results) => {
     if (err) {
@@ -2602,6 +3956,24 @@ app.post('/insert_new_day_entry', (req, res) => {
 
   // Insert query assuming DayID is auto-increment
   const query = `INSERT INTO end_day (StartTime) VALUES (?)`;
+
+  db.query(query, [startTime], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database insertion error' });
+      return;
+    }
+    
+    // If you need to return the inserted row or the newly inserted DayID
+    res.send({ success: true, dayId: results.insertId });
+  });
+});
+
+// Endpoint to insert a new day entry
+app.post('/2insert_new_day_entry', (req, res) => {
+  const { startTime } = req.body;
+
+  // Insert query assuming DayID is auto-increment
+  const query = `INSERT INTO hidden_end_day (StartTime) VALUES (?)`;
 
   db.query(query, [startTime], (err, results) => {
     if (err) {
@@ -2633,12 +4005,53 @@ app.get('/check_if_day_exists', (req, res) => {
   });
 });
 
+// Endpoint to check if a day entry exists for today
+app.get('/2check_if_day_exists', (req, res) => {
+  const today = new Date().toISOString().slice(0, 10); // Get today's date (YYYY-MM-DD)
+  const query = `SELECT DayID FROM hidden_end_day WHERE DATE(StartTime) = ?`;
+
+  db.query(query, [today], (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+
+    if (results.length > 0) {
+      res.send({ success: true, dayExists: true, dayID: results[0].DayID });
+    } else {
+      res.send({ success: true, dayExists: false });
+    }
+  });
+});
 
 // Endpoint to check unfinished day
 app.get('/checkUnfinishedDay', (req, res) => {
   const query = `
     SELECT *
     FROM end_day
+    WHERE IsClosed = 0
+      AND StartTime < CURDATE()
+  `;
+
+  db.query(query, (error, results) => {
+    if (error) {
+      console.error('Error checking for unfinished day:', error);
+      res.status(500).json({ error: 'Database query failed' });
+      return;
+    }
+
+    // If there's any result, it means there's an unfinished day
+    const hasUnfinishedDay = results.length > 0;
+
+    res.json({ hasUnfinishedDay });
+  });
+});
+
+// Endpoint to check unfinished day
+app.get('/2checkUnfinishedDay', (req, res) => {
+  const query = `
+    SELECT *
+    FROM hidden_end_day
     WHERE IsClosed = 0
       AND StartTime < CURDATE()
   `;
@@ -2680,12 +4093,52 @@ app.get('/checkDayFinished', (req, res) => {
   });
 });
 
+// Endpoint to check if today is finished
+app.get('/2checkDayFinished', (req, res) => {
+  const query = `
+    SELECT *
+    FROM hidden_end_day
+    WHERE DATE(EndTime) = CURDATE()
+      AND IsClosed = 1
+  `;
+
+  db.query(query, (error, results) => {
+    if (error) {
+      console.error('Error checking for finished day:', error);
+      res.status(500).json({ error: 'Database query failed' });
+      return;
+    }
+
+    // If there's a result, it means the day is finished
+    const isDayFinished = results.length > 0;
+
+    res.json({ isDayFinished });
+  });
+});
+
+
 
 // Fetch total payouts with ShiftEnded = 1 and IsEndOfDay = 0
 app.get('/payouts/totals', (req, res) => {
   const query = `
     SELECT SUM(TotalPayouts) AS totalPayouts
     FROM payouts
+    WHERE ShiftEnded = 1 AND IsEndOfDay = 0
+  `;
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+    } else {
+      res.json({ totalPayouts: results[0].totalPayouts });
+    }
+  });
+});
+
+// Fetch total payouts with ShiftEnded = 1 and IsEndOfDay = 0
+app.get('/2payouts/totals', (req, res) => {
+  const query = `
+    SELECT SUM(TotalPayouts) AS totalPayouts
+    FROM hidden_payouts
     WHERE ShiftEnded = 1 AND IsEndOfDay = 0
   `;
   db.query(query, (err, results) => {
@@ -2743,10 +4196,69 @@ app.post('/end_day', (req, res) => {
   });
 });
 
+// Insert into end_day table with EndTime included
+app.post('/2end_day', (req, res) => {
+  const { 
+    cashCollection, 
+    totalSales, 
+    totalPayouts, 
+    totalCash, 
+    billDiscount, 
+    serviceCharge, 
+    paymentDetails,
+    dayID // Added DayID to the request body
+  } = req.body;
+
+  const query = `
+  UPDATE hidden_end_day
+  SET 
+    EndTime = CONCAT(DATE(StartTime), ' ', TIME(CONVERT_TZ(NOW(), '+00:00', '+08:00'))), 
+    CashCollection = ?, 
+    TotalSales = ?, 
+    TotalPayouts = ?, 
+    TotalCash = ?, 
+    BillDiscount = ?, 
+    ServiceCharge = ?, 
+    PaymentDetails = ?, 
+    IsClosed = 1
+  WHERE DayID = ?; -- Use DayID to target the correct row
+  `;
+
+  db.query(query, [
+    cashCollection, 
+    totalSales, 
+    totalPayouts, 
+    totalCash, 
+    billDiscount, 
+    serviceCharge, 
+    JSON.stringify(paymentDetails),
+    dayID // Target the correct row by DayID
+  ], (err) => {
+    if (err) {
+      res.status(500).send(err);
+    } else {
+      res.sendStatus(200);
+    }
+  });
+});
 
 
 app.get('/current_day_id', (req, res) => {
   const query = `SELECT DayID FROM end_day WHERE EndTime IS NULL LIMIT 1`;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      res.status(500).send(err);
+    } else if (result.length > 0) {
+      res.json({ dayID: result[0].DayID });
+    } else {
+      res.status(404).json({ error: "No open day found" });
+    }
+  });
+});
+
+app.get('/2current_day_id', (req, res) => {
+  const query = `SELECT DayID FROM hidden_end_day WHERE EndTime IS NULL LIMIT 1`;
 
   db.query(query, (err, result) => {
     if (err) {
@@ -2764,6 +4276,27 @@ app.get('/current_day_id', (req, res) => {
 app.put('/shifts-payouts/update', (req, res) => {
   const updateShiftsQuery = 'UPDATE shift_end SET Ended = 1 WHERE Ended = 0';
   const updatePayoutsQuery = 'UPDATE payouts SET IsEndOfDay = 1 WHERE ShiftEnded = 1 AND IsEndOfDay = 0';
+
+  db.query(updateShiftsQuery, (err) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+
+    db.query(updatePayoutsQuery, (err) => {
+      if (err) {
+        res.status(500).send(err);
+      } else {
+        res.sendStatus(200);
+      }
+    });
+  });
+});
+
+// Update shifts and payouts
+app.put('/2shifts-payouts/update', (req, res) => {
+  const updateShiftsQuery = 'UPDATE hidden_shift_end SET Ended = 1 WHERE Ended = 0';
+  const updatePayoutsQuery = 'UPDATE hidden_payouts SET IsEndOfDay = 1 WHERE ShiftEnded = 1 AND IsEndOfDay = 0';
 
   db.query(updateShiftsQuery, (err) => {
     if (err) {
