@@ -1361,6 +1361,27 @@ app.get('/service_charge', (req, res) => {
     res.send(serviceChargeSettings);
   });
 });
+
+// Fetch service charge settings
+app.get('/2service_charge', (req, res) => {
+  const query = 'SELECT * FROM hidden_settings WHERE SettingName IN ("ServiceChargeEnabled", "ServiceChargePercentage")';
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ success: false, message: 'Database query error' });
+      return;
+    }
+    
+    // Process the results to return a structured response
+    const serviceChargeSettings = {};
+    results.forEach(row => {
+      serviceChargeSettings[row.SettingName] = row.SettingValue;
+    });
+
+    res.send(serviceChargeSettings);
+  });
+});
+
 // Fetch payment methods
 app.get('/payment_methods', (req, res) => {
   const query = 'SELECT * FROM payment_methods WHERE IsActive = 1'; // Fetch only active payment methods
@@ -4675,6 +4696,120 @@ app.post('/1unpaid_orders/saveOrUpdate', (req, res) => {
       // Insert a new order
       const insertQuery = `
         INSERT INTO unpaid_orders (OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice, Ordered, TableName, IsTakeAway)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      db.query(
+        insertQuery,
+        [
+          OrderId,
+          OrderDate,
+          newTotalPrice,
+          mergedItemsString,
+          Discount,
+          finalPrice,
+          Ordered,
+          TableName,
+          IsTakeAway,
+        ],
+        (insertErr) => {
+          if (insertErr) {
+            console.error('Error inserting new order:', insertErr);
+            return res.status(500).send({ success: false, message: 'Error inserting new order' });
+          }
+          res.status(201).send({ success: true, message: 'New order created successfully' });
+        }
+      );
+    }
+  });
+});
+
+app.post('/2unpaid_orders/saveOrUpdate', (req, res) => {
+  const {
+    OrderId,
+    OrderDate,
+    TotalPrice,
+    Items,
+    Discount,
+    FinalPrice,
+    Ordered,
+    TableName,
+    IsTakeAway,
+  } = req.body;
+
+  if (!OrderDate || !Items || !TableName) {
+    return res.status(400).send({ success: false, message: 'Missing required fields' });
+  }
+
+  const selectQuery = `SELECT Items, TotalPrice FROM hidden_unpaid_orders WHERE TableName = ?`;
+
+  db.query(selectQuery, [TableName], (selectErr, selectResult) => {
+    if (selectErr) {
+      console.error('Error fetching existing order:', selectErr);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+
+    let existingItems = [];
+    let newItems = [];
+    let existingTotalPrice = 0;
+
+    try {
+      newItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
+
+      if (selectResult.length > 0 && selectResult[0].Items) {
+        const existingItemsString = selectResult[0].Items;
+        existingItems = typeof existingItemsString === 'string'
+          ? JSON.parse(existingItemsString)
+          : existingItemsString;
+        existingTotalPrice = parseFloat(selectResult[0].TotalPrice) || 0;
+      }
+    } catch (e) {
+      console.error('Error parsing items:', e);
+      return res.status(500).send({ success: false, message: 'Error parsing items' });
+    }
+
+    // Merge the existing and new items
+    const mergedItems = [...existingItems, ...newItems];
+    const mergedItemsString = JSON.stringify(mergedItems);
+
+    // Calculate the new total price by summing prices of all items
+    const newTotalPrice = mergedItems.reduce((sum, item) => {
+      return sum + (parseFloat(item.price) || 0) * (item.quantity || 1);
+    }, 0);
+
+    const finalPrice = newTotalPrice; // Update final price (if no additional logic for discount)
+
+    // Determine whether to insert or update based on the existence of existing items
+    if (selectResult.length > 0) {
+      // Update existing order
+      const updateQuery = `
+        UPDATE hidden_unpaid_orders
+        SET OrderDate = ?, TotalPrice = ?, Items = ?, Discount = ?, FinalPrice = ?, Ordered = ?, IsTakeAway = ?
+        WHERE TableName = ?
+      `;
+      db.query(
+        updateQuery,
+        [
+          OrderDate,
+          newTotalPrice,
+          mergedItemsString,
+          Discount,
+          finalPrice,
+          Ordered,
+          IsTakeAway,
+          TableName,
+        ],
+        (updateErr) => {
+          if (updateErr) {
+            console.error('Error updating order:', updateErr);
+            return res.status(500).send({ success: false, message: 'Error updating order' });
+          }
+          res.status(200).send({ success: true, message: 'Order updated successfully with merged items' });
+        }
+      );
+    } else {
+      // Insert a new order
+      const insertQuery = `
+        INSERT INTO hidden_unpaid_orders (OrderId, OrderDate, TotalPrice, Items, Discount, FinalPrice, Ordered, TableName, IsTakeAway)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       db.query(
