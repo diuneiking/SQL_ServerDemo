@@ -2346,26 +2346,48 @@ app.delete('/unpaid_orders/:orderId', (req, res) => {
   });
 });
 
-app.delete('/2unpaid_orders/:orderId', (req, res) => {
-  const orderId = req.params.orderId;
+// app.delete('/2unpaid_orders/:orderId', (req, res) => {
+//   const orderId = req.params.orderId;
 
-  const query = 'DELETE FROM hidden_unpaid_orders WHERE OrderId = ?';
-  db.query(query, [orderId], (err, result) => {
+//   console.log(`Received delete request for OrderId: ${orderId}`); // Log incoming OrderId
+
+//   const query = 'DELETE FROM hidden_unpaid_orders WHERE OrderId = ?';
+//   db.query(query, [orderId], (err, result) => {
+//     if (err) {
+//       console.error('Failed to delete unpaid order:', err);
+//       return res.status(500).send('Failed to delete unpaid order');
+//     }
+
+//     if (result.affectedRows > 0) {
+//       res.send('Unpaid order deleted successfully');
+//     } else {
+//       console.warn(`No unpaid order found with OrderId: ${orderId}`);
+//       res.status(404).send('Order not found');
+//     }
+//   });
+// });
+
+
+app.delete('/2unpaid_orders/:tableName', (req, res) => {
+  const tableName = req.params.tableName;
+
+  console.log(`Received delete request for Table: ${tableName}`); // Log incoming tableName
+
+  const query = 'DELETE FROM hidden_unpaid_orders WHERE TableName = ?';
+  db.query(query, [tableName], (err, result) => {
     if (err) {
       console.error('Failed to delete unpaid order:', err);
-      return res.status(500).send('Failed to delete unpaid order');
+      return res.status(500).json({ success: false, message: 'Failed to delete unpaid order' });
     }
 
     if (result.affectedRows > 0) {
-      res.send('Unpaid order deleted successfully');
+      res.json({ success: true, message: 'Unpaid order deleted successfully' });
     } else {
-      // Inform that no matching order was found but continue
-      console.warn(`No unpaid order found with OrderId: ${orderId}`);
-      res.status(404).send('Order not found');
+      console.warn(`No unpaid order found with Table: ${tableName}`);
+      res.status(404).json({ success: false, message: 'No unpaid order found with Table: ' + tableName });
     }
   });
 });
-
 
 
 app.delete('/delete_unpaid_orders', (req, res) => {
@@ -4586,6 +4608,24 @@ app.put('/1update_table_status', (req, res) => {
   });
 });
 
+
+app.put('/2update_table_status', (req, res) => {
+  const query = `
+    UPDATE tables t
+    JOIN hidden_unpaid_orders uo ON t.name = uo.TableName
+    SET t.status = 'occupied'
+    WHERE t.status != 'occupied';
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error updating table status:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update table status' });
+    }
+    res.status(200).send({ success: true, message: 'Table statuses updated', affectedRows: result.affectedRows });
+  });
+});
+
 app.get('/1items/:itemCode/modifiers_addons', (req, res) => {
   const { itemCode } = req.params;
 
@@ -4951,6 +4991,25 @@ app.put('/1updateTableName', (req, res) => {
 
   // Use TableName as a unique identifier to update to the new table name.
   const query = `UPDATE unpaid_orders SET TableName = ? WHERE TableName = ?`;
+  db.query(query, [newTableName, oldTableName], (err, result) => {
+    if (err) {
+      console.error('Error updating table name:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    if (result.affectedRows > 0) {
+      res.send({ success: true, message: 'Table name updated successfully' });
+    } else {
+      res.status(404).send({ success: false, message: 'Table not found' });
+    }
+  });
+});
+
+app.put('/2updateTableName', (req, res) => {
+  const { oldTableName, newTableName } = req.body;
+
+  // Use TableName as a unique identifier to update to the new table name.
+  const query = `UPDATE hidden_unpaid_orders SET TableName = ? WHERE TableName = ?`;
   db.query(query, [newTableName, oldTableName], (err, result) => {
     if (err) {
       console.error('Error updating table name:', err);
