@@ -5,12 +5,9 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const http = require('http');
 const WebSocket = require('ws');
-const net = require('net');
-require('dotenv').config();
 
 const app = express();
 const port = 3000;
-const printerPort = 9100;
 
 // Middleware
 app.use(bodyParser.json());
@@ -5256,47 +5253,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-const printerProxyServer = net.createServer((clientSocket) => {
-  console.log('New client connected to the printer proxy');
-
-  // Read PrinterID from the initial data sent by the client
-  clientSocket.once('data', (data) => {
-    const printerID = data.toString().trim(); // Assuming PrinterID is sent as plain text
-
-    // Query the database for the printer's IP address
-    db.query('SELECT IpAddress FROM printers WHERE PrinterID = ?', [printerID], (err, results) => {
-      if (err || results.length === 0) {
-        console.error('Printer not found or database error', err);
-        clientSocket.end('Printer not found');
-        return;
-      }
-
-      const { IpAddress } = results[0];
-      console.log(`Forwarding print job to printer at ${IpAddress}:${printerPort}`);
-
-      // Forward the connection to the printer
-      const printerSocket = net.connect(printerPort, IpAddress, () => {
-        clientSocket.pipe(printerSocket).pipe(clientSocket); // Pipe data between client and printer
-      });
-
-      printerSocket.on('error', (err) => {
-        console.error(`Error connecting to printer at ${IpAddress}:`, err);
-        clientSocket.end('Printer connection error');
-      });
-    });
-  });
-
-  clientSocket.on('error', (err) => {
-    console.error('Client socket error', err);
-  });
-});
-
-// Start the printer proxy server on port 9100
-printerProxyServer.listen(printerPort, () => {
-  console.log(`Printer proxy server running on port ${printerPort}`);
-});
-
-
 // Broadcast function to send updates to all connected clients
 function broadcastUpdate(update) {
   wss.clients.forEach((client) => {
@@ -5311,6 +5267,8 @@ app.use((req, res) => {
   console.warn(`Undefined route accessed: ${req.method} ${req.url}`);
   res.status(404).send({ success: false, message: 'Endpoint not found' });
 });
+
+
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
