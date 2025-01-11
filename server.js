@@ -5,9 +5,14 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const http = require('http');
 const WebSocket = require('ws');
+const net = require('net');
+
+require('dotenv').config();
 
 const app = express();
 const port = 3000;
+const printerPort = 9100; // Printer port (internal and public)
+const proxyPort = 9100; // Proxy server listens on this port
 
 // Middleware
 app.use(bodyParser.json());
@@ -5268,6 +5273,18 @@ app.use((req, res) => {
   res.status(404).send({ success: false, message: 'Endpoint not found' });
 });
 
+// Connect to a printer on the local network
+const printerIP = '192.168.0.201'; // Replace with the printer's IP
+
+const client = net.connect(printerPort, printerIP, () => {
+  console.log('Connected to printer');
+  client.write('Print job content\n');
+  client.end();
+});
+
+client.on('error', (err) => {
+  console.error('Error connecting to printer:', err);
+});
 
 
 server.listen(port, '0.0.0.0', () => {

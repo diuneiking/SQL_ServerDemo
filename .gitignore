@@ -33,3 +33,7 @@ Thumbs.db   # Windows specific
 # Temporary files
 *.swp
 *.swo
+
+#Cert and Key
+.key
+.crt
