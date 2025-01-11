@@ -5199,28 +5199,6 @@ app.post('/staff/terminal', (req, res) => {
   });
 });
 
-app.post('/print', (req, res) => {
-  const { printerIp, content } = req.body;
-
-  if (!printerIp || !content) {
-      return res.status(400).json({ success: false, message: 'Invalid data' });
-  }
-
-  const client = new net.Socket();
-
-  client.connect(9100, printerIp, () => {
-      console.log(`Connected to printer at ${printerIp}`);
-      client.write(content);
-      client.end();
-      res.status(200).json({ success: true, message: 'Print job sent successfully' });
-  });
-
-  client.on('error', (err) => {
-      console.error(`Error connecting to printer: ${err}`);
-      res.status(500).json({ success: false, message: 'Failed to send print job' });
-  });
-});
-
 
 // WebSocket connection handler
 wss.on('connection', (ws) => {
