@@ -5258,6 +5258,7 @@ app.post('/print', (req, res) => {
           proxyReq.write(printData);
           proxyReq.end();
       });
+      console.log('Sending data to printer:', printData);
 
       res.status(200).send({ success: true, message: 'Print job sent to all applicable printers' });
   });
