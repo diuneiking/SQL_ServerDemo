@@ -5202,53 +5202,64 @@ app.post('/staff/terminal', (req, res) => {
 app.post('/print', (req, res) => {
   const { printerId, printData } = req.body;
 
-  // Fetch printer details from the database
-  const query = 'SELECT * FROM hidden_printers WHERE PrinterID = ?';
+  // If printerId is provided, fetch details for that specific printer
+  const query = printerId
+      ? 'SELECT * FROM hidden_printers WHERE PrinterID = ?'
+      : 'SELECT * FROM hidden_printers';
+
   db.query(query, [printerId], (err, results) => {
       if (err) {
-          res.status(500).send({ success: false, message: 'Database query error' });
-          return;
+          console.error('Database query error:', err);
+          return res.status(500).send({ success: false, message: 'Database query error' });
       }
 
       if (results.length === 0) {
-          res.status(404).send({ success: false, message: 'Printer not found' });
-          return;
+          return res.status(404).send({ success: false, message: 'Printer not found' });
       }
 
-      const printer = results[0];
-      const printerIP = printer.IpAddress;
-
-      // Forward to the public IP of the local machine
-      const options = {
-          hostname: '60.50.252.36', // Replace with your public IP or hostname
-          port: 8080, // Port forwarded to Apache
-          path: `/printer?printerIP=${printerIP}`,
-          method: 'POST',
-          headers: {
-              'Content-Type': 'text/plain',
-              'Content-Length': Buffer.byteLength(printData),
-          },
-      };
-
-      const proxyReq = http.request(options, (proxyRes) => {
-          let responseBody = '';
-          proxyRes.on('data', (chunk) => {
-              responseBody += chunk;
-          });
-          proxyRes.on('end', () => {
-              res.send({ success: true, message: 'Print job sent successfully' });
-          });
+      // If printerId is provided, results will contain one printer; otherwise, all printers
+      const printers = printerId ? results : results.filter((printer) => {
+          // Example logic to filter printers for specific print jobs
+          // You can customize this based on your requirements
+          return printer.IsReceiptPrinter === 1 || printer.IsOrderSlipPrinter === 1;
       });
 
-      proxyReq.on('error', (error) => {
-          console.error('Error forwarding print job:', error.message);
-          res.status(500).send({ success: false, message: 'Failed to send print job' });
+      // Loop through all applicable printers and send the print job
+      printers.forEach((printer) => {
+          const printerIP = printer.IpAddress;
+
+          const options = {
+              hostname: printerIP, // Use the printer's IP address
+              port: printer.Port || 9100, // Use the printer's port or default to 9100
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'text/plain',
+                  'Content-Length': Buffer.byteLength(printData),
+              },
+          };
+
+          const proxyReq = http.request(options, (proxyRes) => {
+              let responseBody = '';
+              proxyRes.on('data', (chunk) => {
+                  responseBody += chunk;
+              });
+              proxyRes.on('end', () => {
+                  console.log(`Print job sent to printer ${printer.PrinterName}`);
+              });
+          });
+
+          proxyReq.on('error', (error) => {
+              console.error(`Error sending print job to printer ${printer.PrinterName}:`, error.message);
+          });
+
+          proxyReq.write(printData);
+          proxyReq.end();
       });
 
-      proxyReq.write(printData);
-      proxyReq.end();
+      res.status(200).send({ success: true, message: 'Print job sent to all applicable printers' });
   });
 });
+
 
 
 // WebSocket connection handler
