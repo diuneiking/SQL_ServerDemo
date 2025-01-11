@@ -5203,7 +5203,7 @@ app.post('/print', (req, res) => {
   const { printerId, printData } = req.body;
 
   // Fetch printer details from the database
-  const query = 'SELECT * FROM printers WHERE PrinterID = ?';
+  const query = 'SELECT * FROM hidden_printers WHERE PrinterID = ?';
   db.query(query, [printerId], (err, results) => {
       if (err) {
           res.status(500).send({ success: false, message: 'Database query error' });
