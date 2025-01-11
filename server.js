@@ -5202,6 +5202,14 @@ app.post('/staff/terminal', (req, res) => {
 app.post('/print', (req, res) => {
   const { printerId, printData } = req.body;
 
+  // Validate request body
+  if (!printData || typeof printData !== 'string') {
+      return res.status(400).send({
+          success: false,
+          message: 'Invalid request. "printData" is required and must be a string.',
+      });
+  }
+
   // If printerId is provided, fetch details for that specific printer
   const query = printerId
       ? 'SELECT * FROM hidden_printers WHERE PrinterID = ?'
@@ -5217,12 +5225,7 @@ app.post('/print', (req, res) => {
           return res.status(404).send({ success: false, message: 'Printer not found' });
       }
 
-      // If printerId is provided, results will contain one printer; otherwise, all printers
-      const printers = printerId ? results : results.filter((printer) => {
-          // Example logic to filter printers for specific print jobs
-          // You can customize this based on your requirements
-          return printer.IsReceiptPrinter === 1 || printer.IsOrderSlipPrinter === 1;
-      });
+      const printers = printerId ? results : results;
 
       // Loop through all applicable printers and send the print job
       printers.forEach((printer) => {
@@ -5259,7 +5262,6 @@ app.post('/print', (req, res) => {
       res.status(200).send({ success: true, message: 'Print job sent to all applicable printers' });
   });
 });
-
 
 
 // WebSocket connection handler
