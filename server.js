@@ -4391,7 +4391,7 @@ app.get('/1items', (req, res) => {
   const query = `
     SELECT Category, ItemCode, ItemName, ItemAlias, Price, DepartmentID, Branch, \`Portion\`
     FROM items
-    WHERE IsInactive = 0 
+    WHERE IsInactive = 0 AND TAonly = 0
     ORDER BY Category, ItemName;
   `;
 
@@ -4400,7 +4400,7 @@ app.get('/1items', (req, res) => {
       console.error('Error executing query:', err);
       return res.status(500).send({ success: false, message: 'Internal server error' });
     }
-   
+
     const groupedItems = results.reduce((acc, item) => {
       if (!acc[item.Category]) {
         acc[item.Category] = [];
@@ -4419,6 +4419,7 @@ app.get('/1items', (req, res) => {
     res.status(200).send(groupedItems);
   });
 });
+
 
 
 app.post('/1tables', (req, res) => {
