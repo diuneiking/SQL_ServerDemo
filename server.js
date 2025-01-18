@@ -264,7 +264,7 @@ app.get('/heehee_items/:category', (req, res) => {
 
 // Fetch categories sorted by CategoryID
 app.get('/categories', (req, res) => {
-  const query = 'SELECT * FROM categories WHERE IsInactive = 0 ORDER BY CategoryID ASC';
+  const query = 'SELECT * FROM categories ORDER BY CategoryID ASC';
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send({ success: false, message: 'Database query error' });
