@@ -2839,15 +2839,16 @@ app.post('/items', (req, res) => {
     Inventory,
     IsInactive,
     ModifierCode,
-    AutoMod // Include AutoMod in the request body
+    AutoMod, // Include AutoMod in the request body
+    TAonly,
   } = req.body;
 
   const defaultBranch = 'Heehee'; // Default value for Branch
 
   const query = `
     INSERT INTO items 
-    (ItemCode, ItemName, Price, Category, SKU, DepartmentName, DepartmentID, Inventory, IsInactive, ModifierCode, AutoMod, Branch) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (ItemCode, ItemName, Price, Category, SKU, DepartmentName, DepartmentID, Inventory, IsInactive, ModifierCode, AutoMod, TAonly, Branch) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   db.query(
@@ -2863,7 +2864,8 @@ app.post('/items', (req, res) => {
       Inventory || null,  // Use null if Inventory is not provided
       IsInactive,
       ModifierCode || null, // Use null if ModifierCode is not provided
-      AutoMod || 0,        // Default AutoMod to 0 if not provided
+      AutoMod || 0,
+      TAonly || 0,      
       defaultBranch       // Use the default branch "Heehee"
     ],
     (err, results) => {
@@ -2959,8 +2961,9 @@ app.put('/items/:itemCode', (req, res) => {
     Inventory,
     IsInactive,
     ModifierCode,
-    Portion, // Include Portion in the destructured request body
-    AutoMod   // Include AutoMod in the destructured request body
+    Portion, 
+    AutoMod,
+    TAonly,
   } = req.body;
 
   const query = `
@@ -2975,8 +2978,9 @@ app.put('/items/:itemCode', (req, res) => {
       Inventory = ?, 
       IsInactive = ?, 
       ModifierCode = ?, 
-      \`Portion\` = ?, -- Add Portion to the update query
-      AutoMod = ?     -- Add AutoMod to the update query
+      \`Portion\` = ?,
+      AutoMod = ?,
+      TAonly = ?
     WHERE ItemCode = ?
   `;
   
@@ -2994,6 +2998,7 @@ app.put('/items/:itemCode', (req, res) => {
       ModifierCode || null,
       Portion || null,  // Add Portion to the parameter list
       AutoMod || 0,     // Add AutoMod to the parameter list (default to 0 if null)
+      TAonly || 0,
       itemCode
     ],
     (err, results) => {
