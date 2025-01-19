@@ -29,7 +29,15 @@ const db = mysql.createPool({
   connectionLimit: 50,
   queueLimit: 0
 });
-
+// const db = mysql.createPool({
+//   host: "srv1627.hstgr.io",
+//   user: "u461355420_superadmin",
+//   password: "Heehee@2024",
+//   database: "u461355420_heehee",
+//   waitForConnections: true,
+//   connectionLimit: 50,
+//   queueLimit: 0
+// });
 // Logging middleware for debugging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -87,6 +95,156 @@ app.post('/process-sale', (req, res) => {
     broadcastUpdate({ type: 'inventory-update', itemCode, quantity });
   });
 });
+
+//fetch clock time
+app.get('/clocktime', (req, res) => {
+  const { date } = req.query; // Optional date query parameter
+
+  let query = "SELECT * FROM clocktime";
+  const params = [];
+
+  if (date) {
+    query += " WHERE Date = ?";
+    params.push(date);
+  }
+
+  db.query(query, params, (err, results) => {
+    if (err) {
+      console.error('Error fetching clocktime data:', err);
+      return res.status(500).send({ success: false, message: 'Database error' });
+    }
+
+    res.status(200).send({ success: true, data: results });
+  });
+});
+
+
+app.post('/clocktime/clockinout', (req, res) => {
+  const { staffCode, password, Date: clockDate } = req.body;
+
+  // Basic validation
+  if (!staffCode || !password || !clockDate) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing required fields: staffCode, password, Date',
+    });
+  }
+
+  // Validate the date format (YYYY-MM-DD)
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(clockDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid date format. Expected YYYY-MM-DD.',
+    });
+  }
+
+  // Validate user in "users" table
+  const userQuery = `
+    SELECT UserID, Name, StaffCode
+    FROM users
+    WHERE StaffCode = ? AND Password = ?
+  `;
+  db.query(userQuery, [staffCode, password], (err, userResults) => {
+    if (err) {
+      console.error('Error validating user:', err);
+      return res.status(500).json({ success: false, message: 'Database error' });
+    }
+    if (userResults.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid staffCode or password',
+      });
+    }
+
+    const { UserID, Name, StaffCode } = userResults[0];
+
+    // Check if there's an existing clocktime row for this user & date
+    const findClocktimeSql = `
+      SELECT *
+      FROM clocktime
+      WHERE StaffID = ? AND Date = ?
+      LIMIT 1
+    `;
+    db.query(findClocktimeSql, [UserID, clockDate], (err, clockResults) => {
+      if (err) {
+        console.error('Error checking existing clocktime:', err);
+        return res.status(500).json({ success: false, message: 'Database error' });
+      }
+
+      // Format current time as HH:mm:ss
+      const now = new Date();
+      const padZero = (val) => (val < 10 ? '0' + val : '' + val);
+      const hhmmss = `${padZero(now.getHours())}:${padZero(now.getMinutes())}:${padZero(now.getSeconds())}`;
+
+      if (clockResults.length === 0) {
+        // No existing row, insert new record with ClockIn_1
+        const insertSql = `
+          INSERT INTO clocktime (
+            StaffID, StaffName, StaffCode,
+            Date,
+            ClockIn_1, ClockOut_1,
+            ClockIn_2, ClockOut_2,
+            ClockIn_3, ClockOut_3
+          )
+          VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
+        `;
+        const values = [UserID, Name, StaffCode, clockDate, hhmmss];
+        db.query(insertSql, values, (err, insertResult) => {
+          if (err) {
+            console.error('Error inserting new clocktime:', err);
+            return res.status(500).json({ success: false, message: 'Database insert error' });
+          }
+          return res.status(201).json({
+            success: true,
+            message: 'Clock In #1 successful',
+            insertedId: insertResult.insertId,
+          });
+        });
+      } else {
+        // Found existing row, update the next empty field
+        const row = clockResults[0];
+        let nextField = null;
+
+        if (!row.ClockIn_1) {
+          nextField = 'ClockIn_1';
+        } else if (!row.ClockOut_1) {
+          nextField = 'ClockOut_1';
+        } else if (!row.ClockIn_2) {
+          nextField = 'ClockIn_2';
+        } else if (!row.ClockOut_2) {
+          nextField = 'ClockOut_2';
+        } else if (!row.ClockIn_3) {
+          nextField = 'ClockIn_3';
+        } else if (!row.ClockOut_3) {
+          nextField = 'ClockOut_3';
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: 'All 3 clock ins/outs used up for today!',
+          });
+        }
+
+        const updateSql = `
+          UPDATE clocktime
+          SET ${nextField} = ?
+          WHERE ID = ?
+        `;
+        db.query(updateSql, [hhmmss, row.ID], (err, updateResult) => {
+          if (err) {
+            console.error('Error updating clocktime:', err);
+            return res.status(500).json({ success: false, message: 'Database update error' });
+          }
+          return res.status(200).json({
+            success: true,
+            message: `Successfully updated ${nextField} for existing record.`,
+          });
+        });
+      }
+    });
+  });
+});
+
 
 
 // Fetch glass status
@@ -371,8 +529,6 @@ app.post('/combo-sets', (req, res) => {
     }
   );
 });
-
-
 
 app.get('/combo-sets', (req, res) => {
   const query = `
