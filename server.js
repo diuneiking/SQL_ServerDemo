@@ -174,6 +174,8 @@ app.post('/clocktime/clockinout', (req, res) => {
 
       // Format current time as HH:mm:ss
       const now = new Date();
+      now.setHours(now.getHours() + 8);
+      
       const padZero = (val) => (val < 10 ? '0' + val : '' + val);
       const hhmmss = `${padZero(now.getHours())}:${padZero(now.getMinutes())}:${padZero(now.getSeconds())}`;
 
