@@ -172,7 +172,7 @@ app.get('/clocktime', (req, res) => {
 app.post('/clocktime/clockinout', (req, res) => {
   const { staffCode, password, Date: clockDate } = req.body;
 
-  // Basic validation
+  // 1) Basic validation
   if (!staffCode || !password || !clockDate) {
     return res.status(400).json({
       success: false,
@@ -189,16 +189,19 @@ app.post('/clocktime/clockinout', (req, res) => {
     });
   }
 
-  // Validate user in "users" table
+  // 2) Validate user in "users" table
   const userQuery = `
     SELECT UserID, Name, StaffCode
     FROM users
     WHERE StaffCode = ? AND Password = ?
+    LIMIT 1
   `;
   db.query(userQuery, [staffCode, password], (err, userResults) => {
     if (err) {
       console.error('Error validating user:', err);
-      return res.status(500).json({ success: false, message: 'Database error' });
+      return res
+        .status(500)
+        .json({ success: false, message: 'Database error' });
     }
     if (userResults.length === 0) {
       return res.status(401).json({
@@ -209,7 +212,7 @@ app.post('/clocktime/clockinout', (req, res) => {
 
     const { UserID, Name, StaffCode } = userResults[0];
 
-    // Check if there's an existing clocktime row for this user & date
+    // 3) Check if there's an existing clocktime row for this user & date
     const findClocktimeSql = `
       SELECT *
       FROM clocktime
@@ -219,18 +222,21 @@ app.post('/clocktime/clockinout', (req, res) => {
     db.query(findClocktimeSql, [UserID, clockDate], (err, clockResults) => {
       if (err) {
         console.error('Error checking existing clocktime:', err);
-        return res.status(500).json({ success: false, message: 'Database error' });
+        return res
+          .status(500)
+          .json({ success: false, message: 'Database error' });
       }
 
-      // Format current time as HH:mm:ss
+      // We'll build "now" in local (MY) time by adding +8 hours to system UTC
       const now = new Date();
-      now.setHours(now.getHours() + 8);
-      
+      now.setHours(now.getHours() + 8); // shift to MY time
+
+      // Format "HH:mm:ss" for the new clock event
       const padZero = (val) => (val < 10 ? '0' + val : '' + val);
       const hhmmss = `${padZero(now.getHours())}:${padZero(now.getMinutes())}:${padZero(now.getSeconds())}`;
 
       if (clockResults.length === 0) {
-        // No existing row, insert new record with ClockIn_1
+        // 4) No existing row => Insert a new record w/ ClockIn_1
         const insertSql = `
           INSERT INTO clocktime (
             StaffID, StaffName, StaffCode,
@@ -245,7 +251,9 @@ app.post('/clocktime/clockinout', (req, res) => {
         db.query(insertSql, values, (err, insertResult) => {
           if (err) {
             console.error('Error inserting new clocktime:', err);
-            return res.status(500).json({ success: false, message: 'Database insert error' });
+            return res
+              .status(500)
+              .json({ success: false, message: 'Database insert error' });
           }
           return res.status(201).json({
             success: true,
@@ -254,13 +262,10 @@ app.post('/clocktime/clockinout', (req, res) => {
           });
         });
       } else {
-        // ... found existing row, so we do:
+        // 5) Existing row => find next empty field, but first check if last entry < 5 min
         const row = clockResults[0];
 
-        // We'll figure out which clock field was *last* set (ClockOut_1, ClockIn_2, etc.)
-        let lastFilledFieldTime = null;
-
-        // The order in which fields are filled:
+        // Identify the last FILLED clock field
         const fieldsInOrder = [
           'ClockIn_1',
           'ClockOut_1',
@@ -269,48 +274,23 @@ app.post('/clocktime/clockinout', (req, res) => {
           'ClockIn_3',
           'ClockOut_3',
         ];
-
-        // Traverse in order; the *last* non-null we find is the most recent clock time
+        let lastFilledTime = null;
         for (const field of fieldsInOrder) {
           if (row[field]) {
-            lastFilledFieldTime = row[field]; // e.g. "18:31:41"
+            lastFilledTime = row[field]; // e.g. "03:31:11"
           }
         }
 
-        // Now parse that lastFilledFieldTime if it exists:
-        if (lastFilledFieldTime) {
-          // row.Date is "YYYY-MM-DD" in UTC (based on your DB structure)
-          // lastFilledFieldTime is "HH:mm:ss"
-          const [hStr, mStr, sStr] = lastFilledFieldTime.split(':');
-          const h = parseInt(hStr, 10);
-          const m = parseInt(mStr, 10);
-          const s = parseInt(sStr, 10);
-
-          // Construct a Date from row.Date in UTC
-          // (Alternatively, you might store local times differently. 
-          //  But per your code, the date is just "YYYY-MM-DD", so we do "T00:00:00Z")
-          let lastClockDate = new Date(`${row.Date}T00:00:00Z`);
-
-          // Then add the hours/min/sec from that HH:mm:ss
-          // Because your code also adds +8 to "now" for Malaysia time,
-          // do the same for lastClockDate:
-          lastClockDate.setHours(lastClockDate.getHours() + h + 8);
-          lastClockDate.setMinutes(lastClockDate.getMinutes() + m);
-          lastClockDate.setSeconds(lastClockDate.getSeconds() + s);
-
-          // Meanwhile, "now" in your code also does:
-          //   const now = new Date();
-          //   now.setHours(now.getHours() + 8);
-          // So we already have `now`:
-
-          const now = new Date();
-          now.setHours(now.getHours() + 8);
+        // If there's a last filled time, compare it to "now"
+        if (lastFilledTime) {
+          // Combine the date + last time => "YYYY-MM-DD HH:mm:ss"
+          const lastClockString = `${row.Date} ${lastFilledTime}`;
+          const lastClockDate = new Date(lastClockString);
 
           // Compare difference in minutes
-          const diffMs = now - lastClockDate; // milliseconds
+          const diffMs = now - lastClockDate;
           const diffMinutes = Math.floor(diffMs / 60000);
 
-          // If last clock time was under 5 minutes ago, block
           if (diffMinutes < 5) {
             return res.status(400).json({
               success: false,
@@ -319,7 +299,7 @@ app.post('/clocktime/clockinout', (req, res) => {
           }
         }
 
-        // If we get here, it’s been >= 5 minutes since the last fill. So proceed to find nextField:
+        // 6) If OK => update next empty field
         let nextField = null;
         if (!row.ClockIn_1) {
           nextField = 'ClockIn_1';
@@ -334,19 +314,19 @@ app.post('/clocktime/clockinout', (req, res) => {
         } else if (!row.ClockOut_3) {
           nextField = 'ClockOut_3';
         } else {
+          // All fields used
           return res.status(400).json({
             success: false,
             message: 'All 3 clock ins/outs used up for today!',
           });
         }
 
-        // Update the nextField with the current time
+        // 7) Perform the UPDATE
         const updateSql = `
           UPDATE clocktime
           SET ${nextField} = ?
           WHERE ID = ?
         `;
-
         db.query(updateSql, [hhmmss, row.ID], (err, updateResult) => {
           if (err) {
             console.error('Error updating clocktime:', err);
