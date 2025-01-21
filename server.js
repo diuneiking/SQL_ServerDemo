@@ -96,6 +96,56 @@ app.post('/process-sale', (req, res) => {
   });
 });
 
+app.get('/get-inventory-items', (req, res) => {
+  const query = `
+    SELECT ItemCode, ItemName, Inventory 
+    FROM items 
+    WHERE Inventory IS NOT NULL
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Failed to fetch inventory items:', err);
+      return res.status(500).json({ error: 'Failed to fetch inventory items' });
+    }
+    res.status(200).json(results);
+  });
+});
+
+app.post('/update-inventory', (req, res) => {
+  const { inventory } = req.body;
+
+  // Validate input
+  if (!inventory || !Array.isArray(inventory) || inventory.length === 0) {
+    return res.status(400).send({ success: false, message: 'Inventory data is required' });
+  }
+
+  // Prepare update query
+  const updateQuery = 'UPDATE items SET Inventory = ? WHERE ItemCode = ?';
+
+  // Execute updates in a loop using Promise.all
+  const updatePromises = inventory.map(item => {
+    return new Promise((resolve, reject) => {
+      db.query(updateQuery, [item.Inventory, item.ItemCode], (err, result) => {
+        if (err) {
+          console.error(`Failed to update ItemCode: ${item.ItemCode}`, err);
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  });
+
+  Promise.all(updatePromises)
+    .then(() => res.status(200).send({ success: true, message: 'Inventory updated successfully' }))
+    .catch(err => {
+      console.error('Database update error:', err);
+      res.status(500).send({ success: false, message: 'Failed to update inventory' });
+    });
+});
+
+
 //fetch clock time
 app.get('/clocktime', (req, res) => {
   const { date } = req.query; // Optional date query parameter
