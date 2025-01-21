@@ -20,24 +20,24 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Database connection
-// const db = mysql.createPool({
-//   host: process.env.DB_HOST,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME,
-//   waitForConnections: true,
-//   connectionLimit: 50,
-//   queueLimit: 0
-// });
 const db = mysql.createPool({
-  host: "srv1627.hstgr.io",
-  user: "u461355420_superadmin",
-  password: "Heehee@2024",
-  database: "u461355420_heehee",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 50,
   queueLimit: 0
 });
+// const db = mysql.createPool({
+//   host: "srv1627.hstgr.io",
+//   user: "u461355420_superadmin",
+//   password: "Heehee@2024",
+//   database: "u461355420_heehee",
+//   waitForConnections: true,
+//   connectionLimit: 50,
+//   queueLimit: 0
+// });
 // Logging middleware for debugging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -1884,6 +1884,7 @@ app.post('/insert_sales_data', (req, res) => {
           const documentLineitemsID = `${orderId}-0001`;
           const malaysiaTime = new Date();
           malaysiaTime.setHours(malaysiaTime.getHours() + 8);
+          const issuanceDateTime = malaysiaTime.toISOString().replace(/\.\d{3}Z$/, 'Z'); 
 
           const insertEInvoiceQuery = `
             INSERT INTO eInvoice (
@@ -1908,7 +1909,7 @@ app.post('/insert_sales_data', (req, res) => {
             insertEInvoiceQuery,
             [
               eInvoiceNumber,
-              malaysiaTime,
+              issuanceDateTime,
               totalExcludingTax,
               totalIncludingTax,
               totalPayableAmount,
