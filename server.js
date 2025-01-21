@@ -265,11 +265,11 @@ app.post('/clocktime/clockinout', (req, res) => {
         // 5) Row exists => check the last filled time to block if < 5 min
         const row = clockResults[0];
 
-        // Determine the last filled clock field
+        // Identify the last filled clock field
         const fieldsInOrder = [
           'ClockIn_1','ClockOut_1',
           'ClockIn_2','ClockOut_2',
-          'ClockIn_3','ClockOut_3',
+          'ClockIn_3','ClockOut_3'
         ];
         let lastFilledTime = null;
         for (const field of fieldsInOrder) {
@@ -279,32 +279,29 @@ app.post('/clocktime/clockinout', (req, res) => {
         }
 
         if (lastFilledTime) {
-          // We'll parse row.Date (YYYY-MM-DD) + lastFilledTime (HH:mm:ss) as server local (UTC)
-          // Because the server is physically UTC, `new Date(year,month,day,h,m,s)` => UTC time
-          const [YYYY, MM, DD] = row.Date.split('-'); // e.g. '2025','01','21'
-          const [hh, mm, ss] = lastFilledTime.split(':'); // e.g. '11','55','00'
+          // row.Date is a JavaScript Date object
+          const year = row.Date.getUTCFullYear();
+          const month = row.Date.getUTCMonth(); // 0-based
+          const day = row.Date.getUTCDate();    // day of month
 
-          // Make a Date in server's local = UTC
-          // So "2025-01-21 11:55:00" => 2025-01-21T11:55:00.000Z in UTC
+          const [hh, mm, ss] = lastFilledTime.split(':');
+
+          // Construct a Date in UTC
           const lastClockDate = new Date(
-            parseInt(YYYY, 10),
-            parseInt(MM, 10) - 1,
-            parseInt(DD, 10),
+            year,
+            month,
+            day,
             parseInt(hh, 10),
             parseInt(mm, 10),
             parseInt(ss, 10)
           );
 
-          // Compare with "now" which we set to +8 => MYT
-          // But "lastClockDate" is 11:55 UTC => that's 19:55 MYT
-          // so if "now" is 19:57 MYT => difference is ~2 minutes
+          // SHIFT "now" to MYT by +8 hours
+          const now = new Date();
+          now.setHours(now.getHours() + 8);
+
           const diffMs = now - lastClockDate;
           const diffMinutes = Math.floor(diffMs / 60000);
-
-          console.log('[clockInOrOut] lastClockDate (UTC):', lastClockDate.toISOString());
-          console.log('[clockInOrOut] now (MYT)         :', now.toISOString());
-          console.log('[clockInOrOut] diffMinutes       :', diffMinutes);
-
           if (diffMinutes < 5) {
             return res.status(400).json({
               success: false,
@@ -312,6 +309,9 @@ app.post('/clocktime/clockinout', (req, res) => {
             });
           }
         }
+
+        // Then pick nextField, do your UPDATE, etc.
+
 
         // 6) If >=5 minutes => find next empty field
         let nextField = null;
