@@ -1795,124 +1795,186 @@ app.post('/insert_sales_data', (req, res) => {
         return Promise.all(
           orderItems.map((item) => {
             return new Promise((resolve, reject) => {
-              // 1) Deduct inventory
-              const deductInventoryQuery = `
-                UPDATE items
-                SET Inventory = CASE
-                  WHEN Inventory IS NULL THEN Inventory -- Leave NULL as is
-                  WHEN Inventory >= ? THEN Inventory - ?
-                  ELSE Inventory
-                END
+              // STEP 1: Check if the item exists and has enough Inventory/Portion
+              const selectItemQuery = `
+                SELECT 
+                  ItemCode, 
+                  IFNULL(Inventory, -1) AS Inventory, 
+                  IFNULL(\`Portion\`, -1) AS \`Portion\`
+                FROM items
                 WHERE ItemCode = ?
-                  AND (Inventory IS NULL OR Inventory >= ?)
+                LIMIT 1
               `;
-              connection.query(
-                deductInventoryQuery,
-                [item.Quantity, item.Quantity, item.ItemCode, item.Quantity],
-                (err, invResults) => {
-                  if (err) {
-                    console.error(`Failed to update Inventory for ItemCode ${item.ItemCode}:`, err);
-                    return reject(err);
-                  }
-                  if (invResults.affectedRows === 0) {
-                    const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
-                    console.error(errorMsg);
-                    return reject(new Error(errorMsg));
-                  }
-
-                  // 2) Deduct portion
-                  const deductPortionQuery = `
-                    UPDATE items
-                    SET \`Portion\` = CASE
-                      WHEN \`Portion\` IS NULL THEN \`Portion\` -- Leave NULL as is
-                      WHEN \`Portion\` >= ? THEN \`Portion\` - ?
-                      ELSE \`Portion\`
-                    END
-                    WHERE \`ItemCode\` = ?
-                      AND (\`Portion\` IS NULL OR \`Portion\` >= ?)
-                  `;
-                  connection.query(
-                    deductPortionQuery,
-                    [item.Quantity, item.Quantity, item.ItemCode, item.Quantity],
-                    (err, portionResults) => {
-                      if (err) {
-                        console.error(`Failed to update Portion for ItemCode ${item.ItemCode}:`, err);
-                        return reject(err);
-                      }
-                      if (portionResults.affectedRows === 0) {
-                        const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode}`;
-                        console.error(errorMsg);
-                        return reject(new Error(errorMsg));
-                      }
-
-                      // 3) Insert sales_items row
-                      //    Consider item.Discount, or fallback to 0 if not present
-                      const lineItemDiscount = item.Discount || 0;
-                      const lineItemDiscountCode = item.ItemDiscountCode || '';
-                      const lineItemDiscountName = item.ItemDiscountName || '';
-                      const lineItemDiscountType = item.ItemDiscountType || '';
-
-                      const itemPrice = parseFloat(item.Price) || 0;
-                      const itemFinalPrice = itemPrice - lineItemDiscount;
-
-                      const insertSalesItemsQuery = `
-                        INSERT INTO sales_items (
-                          SalesId,
-                          ItemCode,
-                          ItemName,
-                          Quantity,
-                          Price,
-                          OrderID,
-                          Discount,
-                          FinalPrice,
-                          Remark,
-                          ModifierCode,
-                          AddOns,
-                          IsTakeAway,
-                          ItemDiscountCode,
-                          ItemDiscountName,
-                          ItemDiscountType
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                      `;
-                      connection.query(
-                        insertSalesItemsQuery,
-                        [
-                          salesId,
-                          item.ItemCode,
-                          item.ItemName,
-                          item.Quantity,
-                          item.Price,
-                          orderId,
-                          lineItemDiscount,
-                          itemFinalPrice,
-                          item.Remark || '',
-                          item.ModifierCode || '',
-                          JSON.stringify(item.SelectedAddOns || []),
-                          isTakeAway ? 1 : 0,
-                          lineItemDiscountCode,
-                          lineItemDiscountName,
-                          lineItemDiscountType,
-                        ],
-                        (err, result) => {
-                          if (err) {
-                            console.error(
-                              `Failed to insert sales_items for ItemCode ${item.ItemCode}:`, 
-                              err
-                            );
-                            return reject(err);
-                          }
-                          resolve(result);
-                        }
-                      );
-                    }
-                  );
+              connection.query(selectItemQuery, [item.ItemCode], (err, selectResults) => {
+                if (err) {
+                  console.error(`Failed to select item ${item.ItemCode}:`, err);
+                  return reject(err);
                 }
-              );
+                if (!selectResults || selectResults.length === 0) {
+                  // The item code doesn't exist in the DB at all
+                  const errorMsg = `ItemCode ${item.ItemCode} not found in items table.`;
+                  console.error(errorMsg);
+                  return reject(new Error(errorMsg));
+                }
+      
+                // We have the row; check Inventory and Portion
+                const row = selectResults[0];
+                const currentInventory = parseFloat(row.Inventory);
+                const currentPortion = parseFloat(row.Portion);
+                const quantityNeeded = parseFloat(item.Quantity) || 0;
+      
+                // If Inventory is -1, that means DB had NULL (we do not reduce it).
+                // If it's >= 0, we confirm there's enough.
+                if (currentInventory >= 0 && currentInventory < quantityNeeded) {
+                  const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode} (Have ${currentInventory}, Need ${quantityNeeded})`;
+                  console.error(errorMsg);
+                  return reject(new Error(errorMsg));
+                }
+      
+                // If Portion is -1, that means DB had NULL (we do not reduce it).
+                // If it's >= 0, we confirm there's enough.
+                if (currentPortion >= 0 && currentPortion < quantityNeeded) {
+                  const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode} (Have ${currentPortion}, Need ${quantityNeeded})`;
+                  console.error(errorMsg);
+                  return reject(new Error(errorMsg));
+                }
+      
+                // STEP 2: Deduct inventory if it's NOT NULL in DB
+                let deductInventoryQuery = '';
+                const inventoryParams = [];
+                if (currentInventory >= 0) {
+                  deductInventoryQuery = `
+                    UPDATE items
+                    SET Inventory = Inventory - ?
+                    WHERE ItemCode = ?
+                  `;
+                  inventoryParams.push(quantityNeeded, item.ItemCode);
+                }
+      
+                // STEP 3: Deduct portion if it's NOT NULL in DB
+                let deductPortionQuery = '';
+                const portionParams = [];
+                if (currentPortion >= 0) {
+                  deductPortionQuery = `
+                    UPDATE items
+                    SET \`Portion\` = \`Portion\` - ?
+                    WHERE ItemCode = ?
+                  `;
+                  portionParams.push(quantityNeeded, item.ItemCode);
+                }
+      
+                // We'll run these updates in sequence if needed
+                const runInventoryUpdate = () => {
+                  return new Promise((invResolve, invReject) => {
+                    if (!deductInventoryQuery) return invResolve(); // skip if inventory = NULL
+                    connection.query(deductInventoryQuery, inventoryParams, (err, invResults) => {
+                      if (err) {
+                        console.error(`Failed to deduct inventory for ${item.ItemCode}:`, err);
+                        return invReject(err);
+                      }
+                      // invResults.affectedRows should be 1 if everything is OK
+                      if (invResults.affectedRows === 0) {
+                        return invReject(
+                          new Error(`Failed to deduct inventory. Possibly no matching row for ${item.ItemCode}.`)
+                        );
+                      }
+                      invResolve();
+                    });
+                  });
+                };
+      
+                const runPortionUpdate = () => {
+                  return new Promise((porResolve, porReject) => {
+                    if (!deductPortionQuery) return porResolve(); // skip if portion = NULL
+                    connection.query(deductPortionQuery, portionParams, (err, portionResults) => {
+                      if (err) {
+                        console.error(`Failed to deduct portion for ${item.ItemCode}:`, err);
+                        return porReject(err);
+                      }
+                      // portionResults.affectedRows should be 1 if everything is OK
+                      if (portionResults.affectedRows === 0) {
+                        return porReject(
+                          new Error(`Failed to deduct portion. Possibly no matching row for ${item.ItemCode}.`)
+                        );
+                      }
+                      porResolve();
+                    });
+                  });
+                };
+      
+                // STEP 4: After deducting inventory/portion, insert into sales_items
+                const insertSalesItem = () => {
+                  return new Promise((insertResolve, insertReject) => {
+                    // handle line-item discount logic
+                    const lineItemDiscount = item.Discount || 0;
+                    const lineItemDiscountCode = item.ItemDiscountCode || '';
+                    const lineItemDiscountName = item.ItemDiscountName || '';
+                    const lineItemDiscountType = item.ItemDiscountType || '';
+                    const itemPrice = parseFloat(item.Price) || 0;
+                    const itemFinalPrice = itemPrice - lineItemDiscount;
+      
+                    const insertSalesItemsQuery = `
+                      INSERT INTO sales_items (
+                        SalesId,
+                        ItemCode,
+                        ItemName,
+                        Quantity,
+                        Price,
+                        OrderID,
+                        Discount,
+                        FinalPrice,
+                        Remark,
+                        ModifierCode,
+                        AddOns,
+                        IsTakeAway,
+                        ItemDiscountCode,
+                        ItemDiscountName,
+                        ItemDiscountType
+                      )
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `;
+                    connection.query(
+                      insertSalesItemsQuery,
+                      [
+                        salesId,
+                        item.ItemCode,
+                        item.ItemName,
+                        item.Quantity,
+                        item.Price,
+                        orderId,
+                        lineItemDiscount,
+                        itemFinalPrice,
+                        item.Remark || '',
+                        item.ModifierCode || '',
+                        JSON.stringify(item.SelectedAddOns || []),
+                        isTakeAway ? 1 : 0,
+                        lineItemDiscountCode,
+                        lineItemDiscountName,
+                        lineItemDiscountType,
+                      ],
+                      (err, result) => {
+                        if (err) {
+                          console.error(`Failed to insert sales_items for ${item.ItemCode}:`, err);
+                          return insertReject(err);
+                        }
+                        insertResolve(result);
+                      }
+                    );
+                  });
+                };
+      
+                // Run the updates in sequence
+                runInventoryUpdate()
+                  .then(() => runPortionUpdate())
+                  .then(() => insertSalesItem())
+                  .then(() => resolve())
+                  .catch((error) => reject(error));
+              });
             });
           })
         );
       };
+      
 
       // (D) Insert into INVOICES
       const insertInvoices = () => {
