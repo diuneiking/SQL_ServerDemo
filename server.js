@@ -488,29 +488,23 @@ app.post('/2admin_login', (req, res) => {
   });
 });
 
+// Fetch categories for Heehee branch
 app.get('/heehee_categories', (req, res) => {
   const query = `
-    SELECT DISTINCT i.Category
-    FROM items i
-    JOIN categories c ON i.Category = c.CategoryName
-    WHERE i.Branch = 'Heehee' 
-      AND i.IsInactive = 0 
-      AND c.IsInactive = 0
-  `;
+    SELECT DISTINCT items.Category
+    FROM items
+    WHERE items.Branch = 'Heehee' AND items.IsInactive = 0`
+  ;
 
   db.query(query, (err, results) => {
     if (err) {
       console.error('Error fetching Heehee categories:', err);
-      res.status(500).json({ error: 'Database error' });
-    } else if (results.length === 0) {
-      console.warn('No categories found');
-      res.status(404).json([]);
+      res.status(500).json([]);
     } else {
-      res.json(results.map(result => result.Category));
+      res.json(results.map(result => result.Category)); // Send only category names
     }
   });
 });
-
 
 
 // Fetch items by category and Branch = Heehee
