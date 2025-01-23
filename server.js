@@ -1685,13 +1685,9 @@ app.post('/insert_sales_data', (req, res) => {
     discountName,
     discountType,
     tenderedCash,
-    itemDiscountCode,
-    itemDiscountName,
-    itemDiscountType,
     changes,
   } = req.body;
 
-  // Basic validations
   if (!userName) {
     console.error('CompletedBy (userName) is null or undefined');
     return res.status(400).send('CompletedBy field is required');
@@ -1702,11 +1698,30 @@ app.post('/insert_sales_data', (req, res) => {
     return res.status(400).send('Order items cannot be empty');
   }
 
-  // Basic calculations
+  // Basic price calculations
   const calculatedServiceCharge = isTakeAway ? 0 : serviceCharge;
   const totalItemPrice = orderItems.reduce((sum, item) => sum + (item.Price * item.Quantity), 0);
   const finalPrice = totalItemPrice - billDiscount + calculatedServiceCharge + rounding;
 
+  // 1) Helper: check if given itemCode is in combo_sets
+  function checkIfComboSet(itemCode, connection) {
+    return new Promise((resolve, reject) => {
+      // Adjust if your primary key or column name is different
+      const sql = `SELECT ComboSetID FROM combo_sets WHERE ComboSetID = ? LIMIT 1`;
+      connection.query(sql, [itemCode], (err, results) => {
+        if (err) return reject(err);
+        if (results && results.length > 0) {
+          // Found a row => it's a combo set
+          resolve(true);
+        } else {
+          // Not found => not a combo set
+          resolve(false);
+        }
+      });
+    });
+  }
+
+  // 2) Start DB connection + transaction
   db.getConnection((err, connection) => {
     if (err) {
       console.error('Failed to get database connection:', err);
@@ -1720,14 +1735,13 @@ app.post('/insert_sales_data', (req, res) => {
         return res.status(500).send('Failed to begin transaction');
       }
 
-      // (A) Fetch discount details from the discounts table (if discountCode provided)
+      // (A) Fetch discount details from 'discounts' table
       const fetchDiscountDetails = () => {
         return new Promise((resolve, reject) => {
           if (!discountCode) {
-            // No discount code => default
+            // No discount => default
             return resolve({ discountValue: 0, discountName: '' });
           }
-
           const discountLookupQuery = `
             SELECT discountValue, discountName
             FROM discounts
@@ -1737,7 +1751,7 @@ app.post('/insert_sales_data', (req, res) => {
           connection.query(discountLookupQuery, [discountCode], (err, results) => {
             if (err) return reject(err);
             if (!results || results.length === 0) {
-              // Discount code not found => default
+              // discountCode not found => fallback
               return resolve({ discountValue: 0, discountName: '' });
             }
             const { discountValue, discountName } = results[0];
@@ -1746,7 +1760,7 @@ app.post('/insert_sales_data', (req, res) => {
         });
       };
 
-      // (B) Insert into SALES (parent record)
+      // (B) Insert the parent row into SALES
       const insertSales = () => {
         return new Promise((resolve, reject) => {
           const insertSalesQuery = `
@@ -1771,210 +1785,260 @@ app.post('/insert_sales_data', (req, res) => {
               tableName,
               isTakeAway ? 1 : 0,
               discountCode,
-              discountName,   // from request body or blank if not provided
+              discountName,
               discountType,
               tenderedCash,
               changes,
-              itemDiscount,   // sum of item-level discount
-              billDiscount,
+              itemDiscount,
+              billDiscount
             ],
             (err, result) => {
               if (err) {
                 console.error('Failed to insert into sales:', err);
                 return reject(err);
               }
-              // Return the newly inserted PK (SalesId)
               resolve(result.insertId);
             }
           );
         });
       };
 
-      // (C) Insert SALES_ITEMS and deduct inventory/portion for each item
+      // (C) Insert items + skip inventory if it's a combo set
       const insertSalesItems = (salesId, orderItems, connection, orderId, isTakeAway) => {
         return Promise.all(
           orderItems.map((item) => {
             return new Promise((resolve, reject) => {
-              // STEP 1: Check if the item exists and has enough Inventory/Portion
-              const selectItemQuery = `
-                SELECT 
-                  ItemCode, 
-                  IFNULL(Inventory, -1) AS Inventory, 
-                  IFNULL(\`Portion\`, -1) AS \`Portion\`
-                FROM items
-                WHERE ItemCode = ?
-                LIMIT 1
-              `;
-              connection.query(selectItemQuery, [item.ItemCode], (err, selectResults) => {
-                if (err) {
-                  console.error(`Failed to select item ${item.ItemCode}:`, err);
-                  return reject(err);
-                }
-                if (!selectResults || selectResults.length === 0) {
-                  // The item code doesn't exist in the DB at all
-                  const errorMsg = `ItemCode ${item.ItemCode} not found in items table.`;
-                  console.error(errorMsg);
-                  return reject(new Error(errorMsg));
-                }
-      
-                // We have the row; check Inventory and Portion
-                const row = selectResults[0];
-                const currentInventory = parseFloat(row.Inventory);
-                const currentPortion = parseFloat(row.Portion);
-                const quantityNeeded = parseFloat(item.Quantity) || 0;
-      
-                // If Inventory is -1, that means DB had NULL (we do not reduce it).
-                // If it's >= 0, we confirm there's enough.
-                if (currentInventory >= 0 && currentInventory < quantityNeeded) {
-                  const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode} (Have ${currentInventory}, Need ${quantityNeeded})`;
-                  console.error(errorMsg);
-                  return reject(new Error(errorMsg));
-                }
-      
-                // If Portion is -1, that means DB had NULL (we do not reduce it).
-                // If it's >= 0, we confirm there's enough.
-                if (currentPortion >= 0 && currentPortion < quantityNeeded) {
-                  const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode} (Have ${currentPortion}, Need ${quantityNeeded})`;
-                  console.error(errorMsg);
-                  return reject(new Error(errorMsg));
-                }
-      
-                // STEP 2: Deduct inventory if it's NOT NULL in DB
-                let deductInventoryQuery = '';
-                const inventoryParams = [];
-                if (currentInventory >= 0) {
-                  deductInventoryQuery = `
-                    UPDATE items
-                    SET Inventory = Inventory - ?
-                    WHERE ItemCode = ?
-                  `;
-                  inventoryParams.push(quantityNeeded, item.ItemCode);
-                }
-      
-                // STEP 3: Deduct portion if it's NOT NULL in DB
-                let deductPortionQuery = '';
-                const portionParams = [];
-                if (currentPortion >= 0) {
-                  deductPortionQuery = `
-                    UPDATE items
-                    SET \`Portion\` = \`Portion\` - ?
-                    WHERE ItemCode = ?
-                  `;
-                  portionParams.push(quantityNeeded, item.ItemCode);
-                }
-      
-                // We'll run these updates in sequence if needed
-                const runInventoryUpdate = () => {
-                  return new Promise((invResolve, invReject) => {
-                    if (!deductInventoryQuery) return invResolve(); // skip if inventory = NULL
-                    connection.query(deductInventoryQuery, inventoryParams, (err, invResults) => {
-                      if (err) {
-                        console.error(`Failed to deduct inventory for ${item.ItemCode}:`, err);
-                        return invReject(err);
-                      }
-                      // invResults.affectedRows should be 1 if everything is OK
-                      if (invResults.affectedRows === 0) {
-                        return invReject(
-                          new Error(`Failed to deduct inventory. Possibly no matching row for ${item.ItemCode}.`)
-                        );
-                      }
-                      invResolve();
-                    });
-                  });
-                };
-      
-                const runPortionUpdate = () => {
-                  return new Promise((porResolve, porReject) => {
-                    if (!deductPortionQuery) return porResolve(); // skip if portion = NULL
-                    connection.query(deductPortionQuery, portionParams, (err, portionResults) => {
-                      if (err) {
-                        console.error(`Failed to deduct portion for ${item.ItemCode}:`, err);
-                        return porReject(err);
-                      }
-                      // portionResults.affectedRows should be 1 if everything is OK
-                      if (portionResults.affectedRows === 0) {
-                        return porReject(
-                          new Error(`Failed to deduct portion. Possibly no matching row for ${item.ItemCode}.`)
-                        );
-                      }
-                      porResolve();
-                    });
-                  });
-                };
-      
-                // STEP 4: After deducting inventory/portion, insert into sales_items
-                const insertSalesItem = () => {
-                  return new Promise((insertResolve, insertReject) => {
-                    // handle line-item discount logic
-                    const lineItemDiscount = item.Discount || 0;
-                    const lineItemDiscountCode = item.ItemDiscountCode || '';
-                    const lineItemDiscountName = item.ItemDiscountName || '';
-                    const lineItemDiscountType = item.ItemDiscountType || '';
-                    const itemPrice = parseFloat(item.Price) || 0;
-                    const itemFinalPrice = itemPrice - lineItemDiscount;
-      
-                    const insertSalesItemsQuery = `
-                      INSERT INTO sales_items (
-                        SalesId,
-                        ItemCode,
-                        ItemName,
-                        Quantity,
-                        Price,
-                        OrderID,
-                        Discount,
-                        FinalPrice,
-                        Remark,
-                        ModifierCode,
-                        AddOns,
-                        IsTakeAway,
-                        ItemDiscountCode,
-                        ItemDiscountName,
-                        ItemDiscountType
-                      )
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    `;
-                    connection.query(
-                      insertSalesItemsQuery,
-                      [
-                        salesId,
-                        item.ItemCode,
-                        item.ItemName,
-                        item.Quantity,
-                        item.Price,
-                        orderId,
-                        lineItemDiscount,
-                        itemFinalPrice,
-                        item.Remark || '',
-                        item.ModifierCode || '',
-                        JSON.stringify(item.SelectedAddOns || []),
-                        isTakeAway ? 1 : 0,
-                        lineItemDiscountCode,
-                        lineItemDiscountName,
-                        lineItemDiscountType,
-                      ],
-                      (err, result) => {
-                        if (err) {
-                          console.error(`Failed to insert sales_items for ${item.ItemCode}:`, err);
-                          return insertReject(err);
-                        }
-                        insertResolve(result);
-                      }
-                    );
-                  });
-                };
-      
-                // Run the updates in sequence
-                runInventoryUpdate()
-                  .then(() => runPortionUpdate())
-                  .then(() => insertSalesItem())
-                  .then(() => resolve())
-                  .catch((error) => reject(error));
-              });
+              // 1) Check if item is a combo set
+              checkIfComboSet(item.ItemCode, connection)
+                .then((isCombo) => {
+                  if (isCombo) {
+                    // If it's a combo set, skip inventory/portion checks
+                    return insertSalesItemsRowOnly(salesId, item, connection, orderId, isTakeAway);
+                  } else {
+                    // Otherwise, do normal inventory checks
+                    return doInventoryChecksAndInsert(salesId, item, connection, orderId, isTakeAway);
+                  }
+                })
+                .then((result) => resolve(result))
+                .catch((error) => reject(error));
             });
           })
         );
       };
-      
+
+      // Helper: insert row into sales_items WITHOUT inventory checks
+      function insertSalesItemsRowOnly(salesId, item, connection, orderId, isTakeAway) {
+        return new Promise((resolve, reject) => {
+          const lineItemDiscount = item.Discount || 0;
+          const lineItemDiscountCode = item.ItemDiscountCode || '';
+          const lineItemDiscountName = item.ItemDiscountName || '';
+          const lineItemDiscountType = item.ItemDiscountType || '';
+          const itemPrice = parseFloat(item.Price) || 0;
+          const itemFinalPrice = itemPrice - lineItemDiscount;
+
+          const insertSalesItemsQuery = `
+            INSERT INTO sales_items (
+              SalesId,
+              ItemCode,
+              ItemName,
+              Quantity,
+              Price,
+              OrderID,
+              Discount,
+              FinalPrice,
+              Remark,
+              ModifierCode,
+              AddOns,
+              IsTakeAway,
+              ItemDiscountCode,
+              ItemDiscountName,
+              ItemDiscountType
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+          connection.query(
+            insertSalesItemsQuery,
+            [
+              salesId,
+              item.ItemCode,
+              item.ItemName,
+              item.Quantity,
+              item.Price,
+              orderId,
+              lineItemDiscount,
+              itemFinalPrice,
+              item.Remark || '',
+              item.ModifierCode || '',
+              JSON.stringify(item.SelectedAddOns || []),
+              isTakeAway ? 1 : 0,
+              lineItemDiscountCode,
+              lineItemDiscountName,
+              lineItemDiscountType,
+            ],
+            (err, result) => {
+              if (err) {
+                console.error(`Failed to insert sales_items (combo set) for ${item.ItemCode}:`, err);
+                return reject(err);
+              }
+              resolve(result);
+            }
+          );
+        });
+      }
+
+      // Helper: do normal inventory/portion checks & then insert
+      function doInventoryChecksAndInsert(salesId, item, connection, orderId, isTakeAway) {
+        return new Promise((resolve, reject) => {
+          // 1) SELECT the item from items table
+          const selectItemQuery = `
+            SELECT 
+              ItemCode, 
+              IFNULL(Inventory, -1) AS Inventory, 
+              IFNULL(\`Portion\`, -1) AS \`Portion\`
+            FROM items
+            WHERE ItemCode = ?
+            LIMIT 1
+          `;
+          connection.query(selectItemQuery, [item.ItemCode], (err, rows) => {
+            if (err) {
+              console.error(`Failed to select item ${item.ItemCode}:`, err);
+              return reject(err);
+            }
+            if (!rows || rows.length === 0) {
+              // item doesn't exist in items table
+              const notFoundMsg = `ItemCode ${item.ItemCode} not found in items table.`;
+              console.error(notFoundMsg);
+              return reject(new Error(notFoundMsg));
+            }
+
+            const row = rows[0];
+            const currentInv = parseFloat(row.Inventory);
+            const currentPor = parseFloat(row.Portion);
+            const qty = parseFloat(item.Quantity) || 0;
+
+            // If inventory is non-NULL, ensure enough
+            if (currentInv >= 0 && currentInv < qty) {
+              const errMsg = `Insufficient inventory for ItemCode ${item.ItemCode} (Have ${currentInv}, Need ${qty})`;
+              console.error(errMsg);
+              return reject(new Error(errMsg));
+            }
+
+            // If portion is non-NULL, ensure enough
+            if (currentPor >= 0 && currentPor < qty) {
+              const errMsg = `Insufficient portion for ItemCode ${item.ItemCode} (Have ${currentPor}, Need ${qty})`;
+              console.error(errMsg);
+              return reject(new Error(errMsg));
+            }
+
+            // 2) Deduct inventory if not NULL
+            const inventoryUpdates = [];
+            if (currentInv >= 0) {
+              inventoryUpdates.push(
+                new Promise((invResolve, invReject) => {
+                  const updateInvQuery = `
+                    UPDATE items
+                    SET Inventory = Inventory - ?
+                    WHERE ItemCode = ?
+                  `;
+                  connection.query(updateInvQuery, [qty, item.ItemCode], (err, invRes) => {
+                    if (err) {
+                      console.error(`Failed to deduct Inventory for ${item.ItemCode}:`, err);
+                      return invReject(err);
+                    }
+                    if (invRes.affectedRows === 0) {
+                      return invReject(new Error(`Could not update inventory for ${item.ItemCode}`));
+                    }
+                    invResolve();
+                  });
+                })
+              );
+            }
+
+            // 3) Deduct portion if not NULL
+            if (currentPor >= 0) {
+              inventoryUpdates.push(
+                new Promise((porResolve, porReject) => {
+                  const updatePortionQuery = `
+                    UPDATE items
+                    SET \`Portion\` = \`Portion\` - ?
+                    WHERE ItemCode = ?
+                  `;
+                  connection.query(updatePortionQuery, [qty, item.ItemCode], (err, porRes) => {
+                    if (err) {
+                      console.error(`Failed to deduct Portion for ${item.ItemCode}:`, err);
+                      return porReject(err);
+                    }
+                    if (porRes.affectedRows === 0) {
+                      return porReject(new Error(`Could not update portion for ${item.ItemCode}`));
+                    }
+                    porResolve();
+                  });
+                })
+              );
+            }
+
+            // 4) After updates, insert into sales_items
+            Promise.all(inventoryUpdates)
+              .then(() => {
+                const lineItemDiscount = item.Discount || 0;
+                const lineItemDiscountCode = item.ItemDiscountCode || '';
+                const lineItemDiscountName = item.ItemDiscountName || '';
+                const lineItemDiscountType = item.ItemDiscountType || '';
+                const itemPrice = parseFloat(item.Price) || 0;
+                const itemFinalPrice = itemPrice - lineItemDiscount;
+
+                const insertSalesItemsQuery = `
+                  INSERT INTO sales_items (
+                    SalesId,
+                    ItemCode,
+                    ItemName,
+                    Quantity,
+                    Price,
+                    OrderID,
+                    Discount,
+                    FinalPrice,
+                    Remark,
+                    ModifierCode,
+                    AddOns,
+                    IsTakeAway,
+                    ItemDiscountCode,
+                    ItemDiscountName,
+                    ItemDiscountType
+                  )
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `;
+                connection.query(
+                  insertSalesItemsQuery,
+                  [
+                    salesId,
+                    item.ItemCode,
+                    item.ItemName,
+                    item.Quantity,
+                    item.Price,
+                    orderId,
+                    lineItemDiscount,
+                    itemFinalPrice,
+                    item.Remark || '',
+                    item.ModifierCode || '',
+                    JSON.stringify(item.SelectedAddOns || []),
+                    isTakeAway ? 1 : 0,
+                    lineItemDiscountCode,
+                    lineItemDiscountName,
+                    lineItemDiscountType,
+                  ],
+                  (err, result) => {
+                    if (err) {
+                      console.error(`Failed to insert sales_items for ${item.ItemCode}:`, err);
+                      return reject(err);
+                    }
+                    resolve(result);
+                  }
+                );
+              })
+              .catch((invErr) => reject(invErr));
+          });
+        });
+      }
 
       // (D) Insert into INVOICES
       const insertInvoices = () => {
@@ -1988,13 +2052,10 @@ app.post('/insert_sales_data', (req, res) => {
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
-          // Convert order items to JSON (for record-keeping)
-          const orderItemsJson = JSON.stringify(
-            orderItems.map((item) => ({
-              ...item,
-              SelectedAddOns: item.SelectedAddOns || [],
-            }))
-          );
+          const orderItemsJson = JSON.stringify(orderItems.map((item) => ({
+            ...item,
+            SelectedAddOns: item.SelectedAddOns || [],
+          })));
 
           connection.query(
             insertInvoicesQuery,
@@ -2015,7 +2076,7 @@ app.post('/insert_sales_data', (req, res) => {
               discountType,
               tenderedCash,
               changes,
-              itemDiscount, // sum of item-level discounts
+              itemDiscount,
               billDiscount,
             ],
             (err, result) => {
@@ -2029,28 +2090,24 @@ app.post('/insert_sales_data', (req, res) => {
         });
       };
 
-      // (E) Insert into eInvoice
-      //     - discountValue => discountRate
-      //     - discountName => discountDescription
+      // (E) Insert into eInvoice (for your e-invoicing logic)
       const insertEInvoice = (fetchedDiscountValue, fetchedDiscountName) => {
         return new Promise((resolve, reject) => {
-          // total discount from both item & bill discount
+          // total discount from item + bill
           const totalDiscountValue = (itemDiscount || 0) + (billDiscount || 0);
-
-          // We'll store relevant amounts in eInvoice
           const eInvoiceNumber = orderId;
-          const totalExcludingTax = totalItemPrice;  // adjust if you have tax logic
-          const totalIncludingTax = totalItemPrice;  // or finalPrice
-          const totalPayableAmount = finalPrice;     // final after discounts + rounding
+          const totalExcludingTax = totalItemPrice; 
+          const totalIncludingTax = totalItemPrice; 
+          const totalPayableAmount = finalPrice;    
           const subtotal = totalItemPrice;
           const unitPrice = totalItemPrice;
           const discountAmount = totalDiscountValue;
-          const discountRate = fetchedDiscountValue;     // from discount table
-          const discountDescription = fetchedDiscountName; 
+          const discountRate = fetchedDiscountValue;
+          const discountDescription = fetchedDiscountName;
           const totalNetAmount = finalPrice;
           const documentLineitemsID = `${orderId}-0001`;
 
-          // Build issuanceDateTime (UTC + 8 for Malaysia)
+          // Malaysia time = UTC+8
           const malaysiaTime = new Date();
           malaysiaTime.setHours(malaysiaTime.getHours() + 8);
           const issuanceDateTime = malaysiaTime.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -2073,6 +2130,7 @@ app.post('/insert_sales_data', (req, res) => {
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
+
           connection.query(
             insertEInvoiceQuery,
             [
@@ -2083,10 +2141,10 @@ app.post('/insert_sales_data', (req, res) => {
               totalPayableAmount,
               subtotal,
               unitPrice,
-              totalDiscountValue,   // store in totaldiscountvalue
-              discountAmount,       // discountAmount
-              discountRate,         // from discount table
-              discountDescription,  // from discount table
+              totalDiscountValue,
+              discountAmount,
+              discountRate,
+              discountDescription,
               totalNetAmount,
               documentLineitemsID,
             ],
@@ -2101,34 +2159,28 @@ app.post('/insert_sales_data', (req, res) => {
         });
       };
 
-      // --------------------------------------
+      // -------------------------------------------------------------
       // Execute everything in sequence
-      // --------------------------------------
+      // -------------------------------------------------------------
       let savedSalesId;
       let fetchedDiscountValue = 0;
       let fetchedDiscountName = '';
 
       fetchDiscountDetails()
         .then(({ discountValue, discountName }) => {
-          // Map the discount table results to local variables
           fetchedDiscountValue = discountValue || 0;
           fetchedDiscountName = discountName || '';
           return insertSales();
         })
         .then((salesId) => {
           savedSalesId = salesId;
-          // IMPORTANT: Pass the full set of arguments so orderItems is defined
+          // Insert items, skipping inventory for combos
           return insertSalesItems(salesId, orderItems, connection, orderId, isTakeAway);
         })
+        .then(() => insertInvoices())
+        .then(() => insertEInvoice(fetchedDiscountValue, fetchedDiscountName))
         .then(() => {
-          return insertInvoices();
-        })
-        .then(() => {
-          // Insert eInvoice using fetched discount info
-          return insertEInvoice(fetchedDiscountValue, fetchedDiscountName);
-        })
-        .then(() => {
-          // Everything succeeded; commit the transaction
+          // Everything succeeded => commit
           connection.commit((err) => {
             if (err) {
               console.error('Failed to commit transaction:', err);
