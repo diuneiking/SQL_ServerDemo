@@ -491,15 +491,23 @@ app.post('/2admin_login', (req, res) => {
 // Fetch categories for Heehee branch
 app.get('/heehee_categories', (req, res) => {
   const query = `
-    SELECT DISTINCT items.Category
-    FROM items
-    WHERE items.Branch = 'Heehee' AND items.IsInactive = 0`
-  ;
+    SELECT DISTINCT c.Category
+    FROM items i
+    INNER JOIN categories c 
+      ON i.Category = c.Category
+    WHERE i.Branch = 'Heehee' 
+      AND c.Branch = 'Heehee'
+      AND i.IsInactive = 0 
+      AND c.IsInactive = 0
+  `;
 
   db.query(query, (err, results) => {
     if (err) {
       console.error('Error fetching Heehee categories:', err);
-      res.status(500).json([]);
+      res.status(500).json({ error: 'Database query failed' });
+    } else if (results.length === 0) {
+      console.warn('No active categories found for Heehee branch');
+      res.status(404).json([]);
     } else {
       res.json(results.map(result => result.Category)); // Send only category names
     }
