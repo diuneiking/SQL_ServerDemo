@@ -1805,13 +1805,15 @@ app.post('/insert_sales_data', (req, res) => {
           return new Promise((resolve, reject) => {
             // Deduct inventory
             const deductInventoryQuery = `
-              UPDATE items
-              SET Inventory = CASE
-                WHEN Inventory IS NOT NULL AND Inventory >= ? THEN Inventory - ?
-                ELSE Inventory
-              END
-              WHERE ItemCode = ?
-            `;
+            UPDATE items
+            SET Inventory = CASE
+              WHEN Inventory IS NULL THEN Inventory -- Leave NULL as is
+              WHEN Inventory >= ? THEN Inventory - ?
+              ELSE Inventory
+            END
+            WHERE ItemCode = ?
+              AND (Inventory IS NULL OR Inventory >= ?)
+          `;
             connection.query(
               deductInventoryQuery,
               [item.Quantity, item.Quantity, item.ItemCode],
