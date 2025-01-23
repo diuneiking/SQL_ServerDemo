@@ -491,10 +491,13 @@ app.post('/2admin_login', (req, res) => {
 // Fetch categories for Heehee branch
 app.get('/heehee_categories', (req, res) => {
   const query = `
-    SELECT DISTINCT items.Category
-    FROM items
-    WHERE items.Branch = 'Heehee' AND items.IsInactive = 0`
-  ;
+    SELECT DISTINCT i.Category
+    FROM items i
+    JOIN categories c ON i.Category = c.CategoryName
+    WHERE i.Branch = 'Heehee' 
+      AND i.IsInactive = 0 
+      AND c.IsInactive = 0
+  `;
 
   db.query(query, (err, results) => {
     if (err) {
