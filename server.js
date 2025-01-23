@@ -1800,66 +1800,71 @@ app.post('/insert_sales_data', (req, res) => {
       /**
        * (C) Insert SALES_ITEMS
        */
-      const insertSalesItems = (salesId) => {
+      const insertSalesItems = (salesId, orderItems, connection, orderId, isTakeAway) => {
         return Promise.all(orderItems.map((item) => {
           return new Promise((resolve, reject) => {
             // Deduct inventory
             const deductInventoryQuery = `
-            UPDATE items
-            SET Inventory = CASE
-              WHEN Inventory IS NULL THEN Inventory -- Leave NULL as is
-              WHEN Inventory >= ? THEN Inventory - ?
-              ELSE Inventory
-            END
-            WHERE ItemCode = ?
-              AND (Inventory IS NULL OR Inventory >= ?)
-          `;
+              UPDATE items
+              SET Inventory = CASE
+                WHEN Inventory IS NULL THEN Inventory -- Leave NULL as is
+                WHEN Inventory >= ? THEN Inventory - ?
+                ELSE Inventory
+              END
+              WHERE ItemCode = ?
+                AND (Inventory IS NULL OR Inventory >= ?)
+            `;
+      
             connection.query(
               deductInventoryQuery,
-              [item.Quantity, item.Quantity, item.ItemCode],
+              [item.Quantity, item.Quantity, item.ItemCode, item.Quantity],
               (err, invResults) => {
-                if (err || invResults.affectedRows === 0) {
-                  return reject(new Error(`Insufficient inventory for ItemCode ${item.ItemCode}`));
+                if (err) {
+                  console.error(`Failed to update Inventory for ItemCode ${item.ItemCode}:`, err);
+                  return reject(err);
                 }
-
+                if (invResults.affectedRows === 0) {
+                  const errorMsg = `Insufficient inventory for ItemCode ${item.ItemCode}`;
+                  console.error(errorMsg);
+                  return reject(new Error(errorMsg));
+                }
+      
+                // Deduct portion
                 const deductPortionQuery = `
-                UPDATE items
-                SET \`Portion\` = CASE
-                  -- If Portion is NULL, leave it as NULL (no deduction)
-                  WHEN \`Portion\` IS NULL THEN \`Portion\`
-                  -- If Portion >= requested quantity, subtract
-                  WHEN \`Portion\` >= ? THEN \`Portion\` - ?
-                  -- Otherwise leave it as is (we won't get here if our WHERE clause is correct)
-                  ELSE \`Portion\`
-                END
-                WHERE \`ItemCode\` = ?
-                  -- The row must have (Portion is NULL) OR (Portion >= needed quantity)
-                  AND (\`Portion\` IS NULL OR \`Portion\` >= ?)
-              `;
-              connection.query(
-                deductPortionQuery,
-                [item.Quantity, item.Quantity, item.ItemCode, item.Quantity],
-                (err, portionResults) => {
-                  if (err) {
-                    console.error(`Failed to update Portion for ItemCode ${item.ItemCode}:`, err);
-                    return reject(err);
-                  }
-                  if (portionResults.affectedRows === 0) {
-                    const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode}`;
-                    console.error(errorMsg);
-                    return reject(new Error(errorMsg));
-                  }
-              
-                    // (C.1) If you have line-item discount logic
-                    let lineItemDiscount = 0;
-
+                  UPDATE items
+                  SET \`Portion\` = CASE
+                    WHEN \`Portion\` IS NULL THEN \`Portion\` -- Leave NULL as is
+                    WHEN \`Portion\` >= ? THEN \`Portion\` - ?
+                    ELSE \`Portion\`
+                  END
+                  WHERE \`ItemCode\` = ?
+                    AND (\`Portion\` IS NULL OR \`Portion\` >= ?)
+                `;
+      
+                connection.query(
+                  deductPortionQuery,
+                  [item.Quantity, item.Quantity, item.ItemCode, item.Quantity],
+                  (err, portionResults) => {
+                    if (err) {
+                      console.error(`Failed to update Portion for ItemCode ${item.ItemCode}:`, err);
+                      return reject(err);
+                    }
+                    if (portionResults.affectedRows === 0) {
+                      const errorMsg = `Insufficient portion for ItemCode ${item.ItemCode}`;
+                      console.error(errorMsg);
+                      return reject(new Error(errorMsg));
+                    }
+      
+                    // Line-item discount logic
+                    let lineItemDiscount = item.Discount || 0;
                     const lineItemDiscountCode = item.ItemDiscountCode || '';
                     const lineItemDiscountName = item.ItemDiscountName || '';
                     const lineItemDiscountType = item.ItemDiscountType || '';
-
+      
                     const itemPrice = parseFloat(item.Price) || 0;
                     const itemFinalPrice = itemPrice - lineItemDiscount;
-
+      
+                    // Insert sales item
                     const insertSalesItemsQuery = `
                       INSERT INTO sales_items (
                         SalesId,
@@ -1880,6 +1885,7 @@ app.post('/insert_sales_data', (req, res) => {
                       )
                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `;
+      
                     connection.query(
                       insertSalesItemsQuery,
                       [
