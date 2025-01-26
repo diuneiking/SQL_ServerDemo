@@ -20,24 +20,24 @@ app.use(cors());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Database connection
-// const db = mysql.createPool({
-//   host: process.env.DB_HOST,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME,
-//   waitForConnections: true,
-//   connectionLimit: 50,
-//   queueLimit: 0
-// });
 const db = mysql.createPool({
-  host: "srv1627.hstgr.io",
-  user: "u461355420_superadmin",
-  password: "Heehee@2024",
-  database: "u461355420_heehee",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 50,
+  connectionLimit: 100,
   queueLimit: 0
 });
+// const db = mysql.createPool({
+//   host: "srv1627.hstgr.io",
+//   user: "u461355420_superadmin",
+//   password: "Heehee@2024",
+//   database: "u461355420_heehee",
+//   waitForConnections: true,
+//   connectionLimit: 100,
+//   queueLimit: 0
+// });
 // Logging middleware for debugging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -5684,22 +5684,34 @@ app.patch('/order-receiver/:orderId', (req, res) => {
   });
 });
 
-// API to add a new order
 app.post('/order-receiver', (req, res) => {
   const { orderId, orderDetails } = req.body;
 
-  const query = `
-    INSERT INTO OrderReceiver (orderId, orderDetails, isDone, receivedTime)
-    VALUES (?, ?, ?, NOW())
-  `;
-  db.query(query, [orderId, JSON.stringify(orderDetails), 0], (err, result) => {
+  const checkQuery = `SELECT COUNT(*) AS count FROM OrderReceiver WHERE orderId = ?`;
+
+  db.query(checkQuery, [orderId], (err, result) => {
     if (err) {
-      console.error('Error inserting new order:', err);
-      return res
-        .status(500)
-        .send({ success: false, message: 'Internal server error' });
+      console.error('Error checking existing order:', err);
+      return res.status(500).send({ success: false, message: 'Internal server error' });
     }
-    res.status(200).send({ success: true, message: 'Order added successfully' });
+
+    if (result[0].count > 0) {
+      // Handle duplicate scenario or update existing order
+      res.status(400).send({ success: false, message: 'Order already exists' });
+    } else {
+      const insertQuery = `
+        INSERT INTO OrderReceiver (orderId, orderDetails, isDone, receivedTime)
+        VALUES (?, ?, ?, NOW())
+      `;
+
+      db.query(insertQuery, [orderId, JSON.stringify(orderDetails), 0], (err, result) => {
+        if (err) {
+          console.error('Error inserting new order:', err);
+          return res.status(500).send({ success: false, message: 'Error inserting new order' });
+        }
+        res.status(200).send({ success: true, message: 'Order added successfully' });
+      });
+    }
   });
 });
 
