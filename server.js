@@ -2505,7 +2505,7 @@ app.post('/heehee_orders/saveOrUpdate', (req, res) => {
     Ordered,
     TableName,
     IsTakeAway,
-    CompletedBy, // Include CompletedBy in the request body
+    CompletedBy,
   } = req.body;
 
   // Set Branch as "Heehee" by default
@@ -2827,6 +2827,36 @@ app.get('/heehee_orders/fetchAll', (req, res) => {
     }
 
     res.status(200).send(results);
+  });
+});
+
+app.post('/heehee_orders/updateDocket', (req, res) => {
+  const { OrderId, docket } = req.body;
+
+  // Validate required fields
+  if (!OrderId || docket === undefined) {
+    return res.status(400).send({ success: false, message: 'OrderId and docket are required' });
+  }
+
+  // Prepare the SQL query to update the docket field
+  const query = `
+    UPDATE heehee_order
+    SET docket = ?
+    WHERE OrderId = ?
+  `;
+
+  // Execute the query
+  db.query(query, [docket, OrderId], (err, result) => {
+    if (err) {
+      console.error('Failed to update docket:', err);
+      return res.status(500).send({ success: false, message: 'Failed to update docket' });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).send({ success: false, message: 'Order not found' });
+    }
+
+    res.status(200).send({ success: true, message: 'Docket updated successfully' });
   });
 });
 
