@@ -1773,9 +1773,9 @@ app.post('/insert_sales_data', (req, res) => {
               OrderID, OrderDate, TotalPrice, FinalPrice, PaymentDetails,
               ServiceCharge, Rounding, CompletedBy, TableName, IsTakeAway,
               discountCode, discountName, discountType, TenderedCash, Changes,
-              ItemDiscount, BillDiscount
+              ItemDiscount, BillDiscount, Discount
             )
-            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
           connection.query(
             insertSalesQuery,
@@ -1795,7 +1795,8 @@ app.post('/insert_sales_data', (req, res) => {
               tenderedCash,
               changes,
               itemDiscount,
-              billDiscount
+              billDiscount,
+              itemDiscount + billDiscount,
             ],
             (err, result) => {
               if (err) {
@@ -2068,7 +2069,7 @@ app.post('/insert_sales_data', (req, res) => {
               orderId,
               totalItemPrice,
               JSON.stringify(paymentDetails),
-              billDiscount,
+              itemDiscount + billDiscount, // Sum for Discount column
               serviceCharge,
               rounding,
               orderItemsJson,
