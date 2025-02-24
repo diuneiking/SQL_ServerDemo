@@ -1708,6 +1708,28 @@ app.post('/insert_sales_data', (req, res) => {
   const totalItemPrice = orderItems.reduce((sum, item) => sum + (item.Price * item.Quantity), 0);
   const finalPrice = totalItemPrice - billDiscount + calculatedServiceCharge + rounding;
 
+  // Helper: Adjust PaymentDetails for Cash payments
+  function adjustPaymentDetailsForCash(paymentDetails, tenderedCash, changes) {
+    try {
+      let parsedDetails = JSON.parse(paymentDetails); // Parse the JSON string
+      if (parsedDetails && parsedDetails.Cash !== undefined) {
+        // If it's a cash payment, update the amount to TenderedCash - Changes
+        parsedDetails.Cash = parseFloat(tenderedCash) - parseFloat(changes || 0);
+        return JSON.stringify(parsedDetails); // Return updated JSON string
+      }
+      return paymentDetails; // Return unchanged if not a cash payment
+    } catch (error) {
+      console.error('Error parsing PaymentDetails:', error);
+      return paymentDetails; // Fallback to original if parsing fails
+    }
+  }
+
+  // Adjust paymentDetails if it's a cash payment
+  let adjustedPaymentDetails = paymentDetails;
+  if (paymentDetails && typeof paymentDetails === 'string') {
+    adjustedPaymentDetails = adjustPaymentDetailsForCash(paymentDetails, tenderedCash, changes);
+  }
+
   // 1) Helper: check if given itemCode is in combo_sets
   function checkIfComboSet(itemCode, connection) {
     return new Promise((resolve, reject) => {
@@ -1766,7 +1788,7 @@ app.post('/insert_sales_data', (req, res) => {
       };
 
       // (B) Insert the parent row into SALES
-      const insertSales = () => {
+   const insertSales = () => {
         return new Promise((resolve, reject) => {
           const insertSalesQuery = `
             INSERT INTO sales (
@@ -1783,7 +1805,7 @@ app.post('/insert_sales_data', (req, res) => {
               orderId,
               totalItemPrice,
               finalPrice,
-              JSON.stringify(paymentDetails),
+              adjustedPaymentDetails, // Use the adjusted payment details
               calculatedServiceCharge,
               rounding,
               userName,
@@ -2068,8 +2090,8 @@ app.post('/insert_sales_data', (req, res) => {
             [
               orderId,
               totalItemPrice,
-              JSON.stringify(paymentDetails),
-              itemDiscount + billDiscount, // Sum for Discount column
+              adjustedPaymentDetails, // Use the adjusted payment details
+              itemDiscount + billDiscount,
               serviceCharge,
               rounding,
               orderItemsJson,
