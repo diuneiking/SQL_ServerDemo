@@ -1708,28 +1708,6 @@ app.post('/insert_sales_data', (req, res) => {
   const totalItemPrice = orderItems.reduce((sum, item) => sum + (item.Price * item.Quantity), 0);
   const finalPrice = totalItemPrice - billDiscount + calculatedServiceCharge + rounding;
 
-  // Helper: Adjust PaymentDetails for Cash payments
-  function adjustPaymentDetailsForCash(paymentDetails, tenderedCash, changes) {
-    try {
-      let parsedDetails = JSON.parse(paymentDetails); // Parse the JSON string
-      if (parsedDetails && parsedDetails.Cash !== undefined) {
-        // If it's a cash payment, update the amount to TenderedCash - Changes
-        parsedDetails.Cash = parseFloat(tenderedCash) - parseFloat(changes || 0);
-        return JSON.stringify(parsedDetails); // Return updated JSON string
-      }
-      return paymentDetails; // Return unchanged if not a cash payment
-    } catch (error) {
-      console.error('Error parsing PaymentDetails:', error);
-      return paymentDetails; // Fallback to original if parsing fails
-    }
-  }
-
-  // Adjust paymentDetails if it's a cash payment
-  let adjustedPaymentDetails = paymentDetails;
-  if (paymentDetails && typeof paymentDetails === 'string') {
-    adjustedPaymentDetails = adjustPaymentDetailsForCash(paymentDetails, tenderedCash, changes);
-  }
-
   // 1) Helper: check if given itemCode is in combo_sets
   function checkIfComboSet(itemCode, connection) {
     return new Promise((resolve, reject) => {
@@ -1788,7 +1766,7 @@ app.post('/insert_sales_data', (req, res) => {
       };
 
       // (B) Insert the parent row into SALES
-   const insertSales = () => {
+      const insertSales = () => {
         return new Promise((resolve, reject) => {
           const insertSalesQuery = `
             INSERT INTO sales (
@@ -1805,7 +1783,7 @@ app.post('/insert_sales_data', (req, res) => {
               orderId,
               totalItemPrice,
               finalPrice,
-              adjustedPaymentDetails, // Use the adjusted payment details
+              JSON.stringify(paymentDetails),
               calculatedServiceCharge,
               rounding,
               userName,
@@ -1862,9 +1840,8 @@ app.post('/insert_sales_data', (req, res) => {
           const lineItemDiscountName = item.ItemDiscountName || '';
           const lineItemDiscountType = item.ItemDiscountType || '';
           const itemPrice = parseFloat(item.Price) || 0;
-          // Calculate FinalPrice as Price * Quantity (ignoring discounts for this requirement)
-          const itemFinalPrice = itemPrice * parseFloat(item.Quantity || 1);
-      
+          const itemFinalPrice = itemPrice - lineItemDiscount;
+
           const insertSalesItemsQuery = `
             INSERT INTO sales_items (
               SalesId,
@@ -1895,7 +1872,7 @@ app.post('/insert_sales_data', (req, res) => {
               item.Price,
               orderId,
               lineItemDiscount,
-              itemFinalPrice, // Use the calculated FinalPrice
+              itemFinalPrice,
               item.Remark || '',
               item.ModifierCode || '',
               JSON.stringify(item.SelectedAddOns || []),
@@ -1918,6 +1895,7 @@ app.post('/insert_sales_data', (req, res) => {
       // Helper: do normal inventory/portion checks & then insert
       function doInventoryChecksAndInsert(salesId, item, connection, orderId, isTakeAway) {
         return new Promise((resolve, reject) => {
+          // 1) SELECT the item from items table
           const selectItemQuery = `
             SELECT 
               ItemCode, 
@@ -1933,28 +1911,32 @@ app.post('/insert_sales_data', (req, res) => {
               return reject(err);
             }
             if (!rows || rows.length === 0) {
+              // item doesn't exist in items table
               const notFoundMsg = `ItemCode ${item.ItemCode} not found in items table.`;
               console.error(notFoundMsg);
               return reject(new Error(notFoundMsg));
             }
-      
+
             const row = rows[0];
             const currentInv = parseFloat(row.Inventory);
             const currentPor = parseFloat(row.Portion);
             const qty = parseFloat(item.Quantity) || 0;
-      
+
+            // If inventory is non-NULL, ensure enough
             if (currentInv >= 0 && currentInv < qty) {
               const errMsg = `Insufficient inventory for ItemCode ${item.ItemCode} (Have ${currentInv}, Need ${qty})`;
               console.error(errMsg);
               return reject(new Error(errMsg));
             }
-      
+
+            // If portion is non-NULL, ensure enough
             if (currentPor >= 0 && currentPor < qty) {
               const errMsg = `Insufficient portion for ItemCode ${item.ItemCode} (Have ${currentPor}, Need ${qty})`;
               console.error(errMsg);
               return reject(new Error(errMsg));
             }
-      
+
+            // 2) Deduct inventory if not NULL
             const inventoryUpdates = [];
             if (currentInv >= 0) {
               inventoryUpdates.push(
@@ -1977,7 +1959,8 @@ app.post('/insert_sales_data', (req, res) => {
                 })
               );
             }
-      
+
+            // 3) Deduct portion if not NULL
             if (currentPor >= 0) {
               inventoryUpdates.push(
                 new Promise((porResolve, porReject) => {
@@ -1999,7 +1982,8 @@ app.post('/insert_sales_data', (req, res) => {
                 })
               );
             }
-      
+
+            // 4) After updates, insert into sales_items
             Promise.all(inventoryUpdates)
               .then(() => {
                 const lineItemDiscount = item.Discount || 0;
@@ -2007,8 +1991,8 @@ app.post('/insert_sales_data', (req, res) => {
                 const lineItemDiscountName = item.ItemDiscountName || '';
                 const lineItemDiscountType = item.ItemDiscountType || '';
                 const itemPrice = parseFloat(item.Price) || 0;
-                const itemFinalPrice = itemPrice * parseFloat(item.Quantity || 1);
-      
+                const itemFinalPrice = itemPrice - lineItemDiscount;
+
                 const insertSalesItemsQuery = `
                   INSERT INTO sales_items (
                     SalesId,
@@ -2084,8 +2068,8 @@ app.post('/insert_sales_data', (req, res) => {
             [
               orderId,
               totalItemPrice,
-              adjustedPaymentDetails, // Use the adjusted payment details
-              itemDiscount + billDiscount,
+              JSON.stringify(paymentDetails),
+              itemDiscount + billDiscount, // Sum for Discount column
               serviceCharge,
               rounding,
               orderItemsJson,
